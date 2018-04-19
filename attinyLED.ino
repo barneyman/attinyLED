@@ -17,7 +17,7 @@
 #define MAXPIX 60
 
 // how many leds we actually have
-unsigned currentCount = MAXPIX;
+byte currentCount = MAXPIX;
 
 struct cRGB led[MAXPIX];
 
@@ -86,37 +86,13 @@ void HandleI2C()
 
 		switch (currentState)
 		{
-		case smIdle:
-			switch (readByte)
-			{
-			case CMD_RESET:
-				memset(&led, 0, sizeof(led));
-				// state stays the same
-				Display();
-				break;
-			case CMD_SIZE:
-				NEED_DATA(smSizing, 1);
-				break;
-			case CMD_SETALL:
-				NEED_DATA(smSetAll, 3);
-				break;
-			case CMD_SETONE:
-				NEED_DATA(smSetOne, 4);
-				break;
-			case CMD_SHIFT:
-				NEED_DATA(smShifting, 4);
-				break;
-#ifdef CMD_ROLL
-			case CMD_ROLL:
-				NEED_DATA(smRolling, 1);
-				break;
-#endif
-			}
-			break;
 		case smSizing:
 			if (SumpData(readByte))
 			{
-				currentCount = (unsigned)data[0];
+				currentCount = data[0];
+				// bounds check
+				if (currentCount > MAXPIX)
+					currentCount = MAXPIX;
 				currentState = smIdle;
 			}
 			break;
@@ -136,10 +112,14 @@ void HandleI2C()
 		case smSetOne:
 			if (SumpData(readByte))
 			{
-				led[(uint8_t)data[0]].r = (uint8_t)data[1];
-				led[(uint8_t)data[0]].g = (uint8_t)data[2];
-				led[(uint8_t)data[0]].b = (uint8_t)data[3];
-				Display();
+				uint8_t offset = (uint8_t)data[0];
+				if (offset < currentCount)
+				{
+					led[(uint8_t)offset].r = (uint8_t)data[1];
+					led[(uint8_t)offset].g = (uint8_t)data[2];
+					led[(uint8_t)offset].b = (uint8_t)data[3];
+					Display();
+				}
 				currentState = smIdle;
 			}
 			break;
@@ -177,15 +157,16 @@ void HandleI2C()
 		case smShifting:
 			if (SumpData(readByte))
 			{
-				int offset = (int)data[0];
+				byte offset = data[0];
 				// if there's no offset, there's nothing to do!
 				if (offset)
 				{
-					int source = 0, dest = 0, size=currentCount, fillStart=0;
+					int source = 0, dest = 0, size=currentCount, fillStart;
 					if (offset > 0)
 					{
 						// shift right
 						dest += offset;
+						fillStart = 0;
 					}
 					else
 					{
@@ -198,7 +179,7 @@ void HandleI2C()
 					size -= abs(offset);
 
 					// shift
-					memmove(&led[source], &led[dest], sizeof(led[source])*size);
+					memmove( &led[dest], &led[source], sizeof(led[source])*size);
 
 					// then fill the void ones
 					size = abs(offset);
@@ -212,6 +193,37 @@ void HandleI2C()
 					Display();
 				}
 				currentState = smIdle;
+			}
+			break;
+		case smIdle:
+			switch (readByte)
+			{
+			case CMD_RESET:
+				//memset(&led, 0, sizeof(led));
+				for (int each = 0; each < currentCount; each++)
+					led[each].r = led[each].b = led[each].g = 0;
+				// state stays the same
+				Display();
+				break;
+			case CMD_SIZE:
+				NEED_DATA(smSizing, 1);
+				break;
+			case CMD_SETALL:
+				NEED_DATA(smSetAll, 3);
+				break;
+			case CMD_SETONE:
+				NEED_DATA(smSetOne, 4);
+				break;
+			case CMD_SHIFT:
+				NEED_DATA(smShifting, 4);
+				break;
+#ifdef CMD_ROLL
+			case CMD_ROLL:
+				NEED_DATA(smRolling, 1);
+				break;
+#endif
+			default:
+				break;
 			}
 			break;
 		}
