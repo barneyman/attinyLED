@@ -1,5 +1,4 @@
-
-#include <TinyWire.h>
+#include <TinyWire.h> // https://github.com/lucullusTheOnly/TinyWire.git
 
 #include "light_ws2812.h"
 #include "ws2812_config.h"
@@ -23,10 +22,15 @@ struct cRGB led[MAXPIX];
 
 //#define _PIPE_TO_NULL
 
+#include <avr\power.h>
 
 // the setup function runs once when you press reset or power the board
 void setup() 
 {
+	// power
+	//ADCSRA &= ~(1 << ADEN); //Disable ADC, saves ~230uA
+	//adc_disable();
+
 	// initialize digital pin LED_BUILTIN as an output.
 	pinMode(LED_BUILTIN, OUTPUT);
 
@@ -34,7 +38,8 @@ void setup()
 	TinyWire.begin(I2C_ADDR);
 
 	// sets callback for the event of a slave receive
-	//TinyWire.onReceive(onI2CReceive);
+	TinyWire.onReceive(onI2CReceive);
+	TinyWire.onRequest(onI2CRequest);
 
 	// clear the LEDS
 	memset(&led, 0, sizeof(led));
@@ -46,12 +51,14 @@ void setup()
 
 
 // the loop function runs over and over again forever
-void loop() 
-{
-	HandleI2C();
-}
+//void loop() 
+//{
+//	HandleI2C();
+//}
 
-enum stateMachine { smIdle, smSizing, smSetAll, smSetOne, smShifting, smRolling } currentState = stateMachine::smIdle;
+enum stateMachine { smIdle=0, smPossibleWork=20, smSizing=100, smSetAll, smSetOne, smShifting, smRolling } ;
+
+volatile stateMachine currentState = stateMachine::smIdle;
 
 #define CMD_RESET	0	// turn it all off
 #define CMD_SIZE	1	// actual number of LEDS
@@ -77,12 +84,85 @@ bool SumpData(byte theByte)
 	return false;
 }
 
-void HandleI2C()
+class circQueue
 {
-	// loops, until all received bytes are read
-	while (TinyWire.available()>0) 
+
+#define _CIRCQSIZE 32
+protected:
+
+	byte m_data[_CIRCQSIZE];
+	// let the compiler do the work
+	byte readCursor : 5, writeCursor : 5;
+
+public:
+
+	circQueue() :readCursor(0), writeCursor(0)
 	{
-		byte readByte = TinyWire.read();
+	}
+
+	int space()
+	{
+		return _CIRCQSIZE - available();
+	}
+
+	unsigned available()
+	{
+		if (readCursor == writeCursor)
+			return 0;
+		if (readCursor > writeCursor)
+		{
+			// use the wrap
+			return ((int)writeCursor | 32) - readCursor;
+		}
+		return (int)(writeCursor - readCursor);
+	}
+
+	byte read()
+	{
+		if (readCursor == writeCursor)
+			return -1;
+
+		return m_data[readCursor++];
+	}
+
+	bool write(byte data)
+	{
+		// relying on bits width math
+		if ((readCursor - 1) == writeCursor)
+			return false;
+		m_data[writeCursor++] = data;
+		return true;
+	}
+
+};
+
+circQueue theQueue;
+
+//#define _TRY_SLEEP
+
+#ifdef _TRY_SLEEP
+#include <avr/sleep.h>
+#endif
+
+//void HandleI2C()
+void  loop()
+{
+	if (currentState == smIdle)
+	{
+#ifdef _TRY_SLEEP
+		// go to sleep
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN); // sleep mode is set here
+		sleep_enable();
+		sleep_mode();                        // System actually sleeps here
+		sleep_disable();                     // System continues execution here when watchdog timed out 
+#endif
+		return;
+	}
+
+	// loops, until all received bytes are read
+	while (theQueue.available()>0) 
+	{
+		byte readByte = theQueue.read();
 
 		switch (currentState)
 		{
@@ -93,7 +173,7 @@ void HandleI2C()
 				// bounds check
 				if (currentCount > MAXPIX)
 					currentCount = MAXPIX;
-				currentState = smIdle;
+				currentState = smPossibleWork;
 			}
 			break;
 		case smSetAll:
@@ -106,7 +186,7 @@ void HandleI2C()
 					led[each].b = (uint8_t)data[2];
 				}
 				Display();
-				currentState = smIdle;
+				currentState = smPossibleWork;
 			}
 			break;
 		case smSetOne:
@@ -120,7 +200,7 @@ void HandleI2C()
 					led[(uint8_t)offset].b = (uint8_t)data[3];
 					Display();
 				}
-				currentState = smIdle;
+				currentState = smPossibleWork;
 			}
 			break;
 		case smRolling:
@@ -192,10 +272,11 @@ void HandleI2C()
 
 					Display();
 				}
-				currentState = smIdle;
+				currentState = smPossibleWork;
 			}
 			break;
 		case smIdle:
+		case smPossibleWork:
 			switch (readByte)
 			{
 			case CMD_RESET:
@@ -227,9 +308,9 @@ void HandleI2C()
 			}
 			break;
 		}
-
-
 	}
+
+	currentState = smIdle;
 
 }
 
@@ -238,12 +319,31 @@ void onI2CReceive(int howMany)
 {
 	digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN)==HIGH)?LOW:HIGH);
 
-#ifdef _PIPE_TO_NULL
-	while (TinyWire.available())
-		TinyWire.read();
-#endif
+	if (currentState == smIdle)
+	{
+		while (TinyWire.available())
+			theQueue.write(TinyWire.read());
+
+		currentState = smPossibleWork;
+	}
+
 }
 
+void onI2CRequest(void)
+{
+	digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
+
+	// meh 
+	byte result = currentState;
+	// if we have more space left then biggest command + data ..
+	if (theQueue.space() >= (MAX_Q_DATA+1))
+	{
+		result |= 128;
+	}
+
+	TinyWire.send(result);
+
+}
 
 
 
