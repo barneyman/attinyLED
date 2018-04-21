@@ -12,8 +12,7 @@
 // 120 = 2m @60pm or 4 metres @30pm
 // 60 = 1m @60pm or 2 metres @30pm
 
-// CANNOT exceed 127
-#define MAXPIX 60
+#define MAXPIX 30
 
 // how many leds we actually have
 byte currentCount = MAXPIX;
@@ -56,7 +55,7 @@ void setup()
 //	HandleI2C();
 //}
 
-enum stateMachine { smIdle=0, smPossibleWork=20, smSizing=100, smSetAll, smSetOne, smShifting, smRolling } ;
+enum stateMachine { smIdle=0, smPossibleWork=20, smSizing=100, smSetAll, smSetOne, smShifting, smRolling, smInverting } ;
 
 volatile stateMachine currentState = stateMachine::smIdle;
 
@@ -66,6 +65,8 @@ volatile stateMachine currentState = stateMachine::smIdle;
 #define CMD_SETONE	3	// set a single led - offset(0) RGB
 #define CMD_SHIFT	4	// shift current set - signed byte (for L and R) RGB replace
 //#define CMD_ROLL	5	// roll - signed byte
+#define CMD_DISPLAY	6	// shunt out to the LEDS - beware, interrupts get cleared, so I2C will fail
+#define CMD_INVERT	7	// invert all rgbs
 
 #define MAX_Q_DATA	4
 
@@ -92,7 +93,7 @@ protected:
 
 	byte m_data[_CIRCQSIZE];
 	// let the compiler do the work
-	byte readCursor : 5, writeCursor : 5;
+	volatile byte readCursor : 5, writeCursor : 5;
 
 public:
 
@@ -159,8 +160,10 @@ void  loop()
 		return;
 	}
 
+	//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
+
 	// loops, until all received bytes are read
-	while (theQueue.available()>0) 
+	while (theQueue.available()) 
 	{
 		byte readByte = theQueue.read();
 
@@ -173,6 +176,8 @@ void  loop()
 				// bounds check
 				if (currentCount > MAXPIX)
 					currentCount = MAXPIX;
+
+				// go around again
 				currentState = smPossibleWork;
 			}
 			break;
@@ -185,7 +190,7 @@ void  loop()
 					led[each].g = (uint8_t)data[1];
 					led[each].b = (uint8_t)data[2];
 				}
-				Display();
+				// go around again
 				currentState = smPossibleWork;
 			}
 			break;
@@ -198,8 +203,8 @@ void  loop()
 					led[(uint8_t)offset].r = (uint8_t)data[1];
 					led[(uint8_t)offset].g = (uint8_t)data[2];
 					led[(uint8_t)offset].b = (uint8_t)data[3];
-					Display();
 				}
+				// go around again
 				currentState = smPossibleWork;
 			}
 			break;
@@ -237,7 +242,7 @@ void  loop()
 		case smShifting:
 			if (SumpData(readByte))
 			{
-				byte offset = data[0];
+				signed char offset = (signed char)data[0];
 				// if there's no offset, there's nothing to do!
 				if (offset)
 				{
@@ -253,7 +258,7 @@ void  loop()
 						// shift left
 						// yes - double negative
 						source -= offset;
-						fillStart = dest;
+						fillStart = currentCount+offset;
 					}
 
 					size -= abs(offset);
@@ -263,6 +268,7 @@ void  loop()
 
 					// then fill the void ones
 					size = abs(offset);
+
 					for (unsigned fill = fillStart; size; size--, fill++)
 					{
 						led[fill].r = (uint8_t)data[1];
@@ -270,21 +276,35 @@ void  loop()
 						led[fill].b = (uint8_t)data[3];
 					}
 
-					Display();
 				}
 				currentState = smPossibleWork;
 			}
 			break;
-		case smIdle:
+		case smInverting:
+			if (SumpData(readByte))
+			{ 
+				int mask = data[0];
+				for (unsigned each = 0; each < currentCount; each++)
+				{
+					led[each].r = (~led[each].r)&mask;
+					led[each].g = (~led[each].g)&mask;
+					led[each].b = (~led[each].b)&mask;
+				}
+			}
+			currentState = smPossibleWork;
+			break;
+		//case smIdle:
 		case smPossibleWork:
 			switch (readByte)
 			{
 			case CMD_RESET:
-				//memset(&led, 0, sizeof(led));
-				for (int each = 0; each < currentCount; each++)
-					led[each].r = led[each].b = led[each].g = 0;
+				memset(&led, 0, sizeof(led));
 				// state stays the same
+				currentState = smPossibleWork;
+				break;
+			case CMD_DISPLAY:
 				Display();
+				currentState = smPossibleWork;
 				break;
 			case CMD_SIZE:
 				NEED_DATA(smSizing, 1);
@@ -298,6 +318,9 @@ void  loop()
 			case CMD_SHIFT:
 				NEED_DATA(smShifting, 4);
 				break;
+			case CMD_INVERT:
+				NEED_DATA(smInverting, 1);
+				break;
 #ifdef CMD_ROLL
 			case CMD_ROLL:
 				NEED_DATA(smRolling, 1);
@@ -306,6 +329,8 @@ void  loop()
 			default:
 				break;
 			}
+			break;
+		default:
 			break;
 		}
 	}
@@ -317,31 +342,48 @@ void  loop()
 
 void onI2CReceive(int howMany) 
 {
-	digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN)==HIGH)?LOW:HIGH);
+	//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN)==HIGH)?LOW:HIGH);
 
-	if (currentState == smIdle)
+	if (theQueue.space() >= howMany)
 	{
 		while (TinyWire.available())
 			theQueue.write(TinyWire.read());
 
-		currentState = smPossibleWork;
+		if(currentState==smIdle)
+			currentState = smPossibleWork;
 	}
+	//else
+	//{
+	//	// pipe to null
+	//	while (TinyWire.available())
+	//		TinyWire.read();
+
+	//}
 
 }
 
 void onI2CRequest(void)
 {
-	digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
+	//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
 
 	// meh 
 	byte result = currentState;
 	// if we have more space left then biggest command + data ..
-	if (theQueue.space() >= (MAX_Q_DATA+1))
+	if (theQueue.space() >= (MAX_Q_DATA + 1))
 	{
 		result |= 128;
 	}
 
-	TinyWire.send(result);
+	result = TinyWire.send(result);
+
+	if (!result)
+	{
+		digitalWrite(LED_BUILTIN, HIGH);
+	}
+	else
+	{
+		digitalWrite(LED_BUILTIN, LOW);
+	}
 
 }
 
