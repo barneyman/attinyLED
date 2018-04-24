@@ -3,16 +3,18 @@
 #include "light_ws2812.h"
 #include "ws2812_config.h"
 
+//#include <Tiny4kOLED.h>
 
 // for attiny85
-#define LED_BUILTIN	PB4
+#define LED_BUILTIN		PB4
+#define LED_WHITE		PB1
 
 #define I2C_ADDR	0x10
 
 // 120 = 2m @60pm or 4 metres @30pm
 // 60 = 1m @60pm or 2 metres @30pm
 
-#define MAXPIX 30
+#define MAXPIX 90
 
 // how many leds we actually have
 byte currentCount = MAXPIX;
@@ -22,6 +24,7 @@ struct cRGB led[MAXPIX];
 //#define _PIPE_TO_NULL
 
 #include <avr\power.h>
+#include <avr\wdt.h>
 
 // the setup function runs once when you press reset or power the board
 void setup() 
@@ -32,6 +35,32 @@ void setup()
 
 	// initialize digital pin LED_BUILTIN as an output.
 	pinMode(LED_BUILTIN, OUTPUT);
+	pinMode(LED_WHITE, OUTPUT);
+
+	digitalWrite(LED_BUILTIN, LOW);
+	digitalWrite(LED_WHITE, LOW);
+
+	for(int flash=0;flash<3;flash++)
+	{
+		digitalWrite(LED_BUILTIN, HIGH);
+		digitalWrite(LED_WHITE, HIGH);
+		delay(200);
+		digitalWrite(LED_BUILTIN, LOW);
+		digitalWrite(LED_WHITE, LOW);
+		delay(200);
+	}
+
+	//oled.begin();
+	//oled.switchRenderFrame();
+	//oled.clear();
+	//oled.on();
+	//oled.write("hello!");
+	//oled.switchFrame();
+	//delay(2000);
+
+	// turn watchdog off
+	//MCUSR = 0;
+	//wdt_disable();
 
 	// config TinyWire library for I2C slave functionality
 	TinyWire.begin(I2C_ADDR);
@@ -88,16 +117,18 @@ bool SumpData(byte theByte)
 class circQueue
 {
 
-#define _CIRCQSIZE 32
+#define _CIRCQSIZE		16
+#define _CIRQSIZEBITS	4
 protected:
 
 	byte m_data[_CIRCQSIZE];
 	// let the compiler do the work
-	volatile byte readCursor : 5, writeCursor : 5;
+	volatile byte readCursor : _CIRQSIZEBITS, writeCursor : _CIRQSIZEBITS;
+	volatile signed availBytes;
 
 public:
 
-	circQueue() :readCursor(0), writeCursor(0)
+	circQueue() :readCursor(0), writeCursor(0), availBytes(0)
 	{
 	}
 
@@ -108,21 +139,23 @@ public:
 
 	unsigned available()
 	{
-		if (readCursor == writeCursor)
-			return 0;
-		if (readCursor > writeCursor)
-		{
-			// use the wrap
-			return ((int)writeCursor | 32) - readCursor;
-		}
-		return (int)(writeCursor - readCursor);
+		return availBytes;
+
+		//if (readCursor == writeCursor)
+		//	return 0;
+		//if (readCursor > writeCursor)
+		//{
+		//	// use the wrap
+		//	return (_CIRCQSIZE-(unsigned)readCursor) + (unsigned)writeCursor;
+		//}
+		//return (int)(writeCursor - readCursor);
 	}
 
 	byte read()
 	{
 		if (readCursor == writeCursor)
 			return -1;
-
+		availBytes--;
 		return m_data[readCursor++];
 	}
 
@@ -132,6 +165,7 @@ public:
 		if ((readCursor - 1) == writeCursor)
 			return false;
 		m_data[writeCursor++] = data;
+		availBytes++;
 		return true;
 	}
 
@@ -166,6 +200,14 @@ void  loop()
 	while (theQueue.available()) 
 	{
 		byte readByte = theQueue.read();
+
+		//oled.print(readByte,HEX);
+		//oled.switchFrame();
+
+		if (readByte == 255)
+		{
+			//digitalWrite(LED_WHITE, (digitalRead(LED_WHITE) == HIGH) ? LOW : HIGH);
+		}
 
 		switch (currentState)
 		{
@@ -298,7 +340,8 @@ void  loop()
 			switch (readByte)
 			{
 			case CMD_RESET:
-				memset(&led, 0, sizeof(led));
+				//memset(&led, 0, sizeof(led));
+				memset(&led, 4, sizeof(led));
 				// state stays the same
 				currentState = smPossibleWork;
 				break;
@@ -327,6 +370,8 @@ void  loop()
 				break;
 #endif
 			default:
+				//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
+				//digitalWrite(LED_WHITE, (digitalRead(LED_WHITE) == HIGH) ? LOW : HIGH);
 				break;
 			}
 			break;
@@ -343,22 +388,40 @@ void  loop()
 void onI2CReceive(int howMany) 
 {
 	//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN)==HIGH)?LOW:HIGH);
-
+	bool one = false;
 	if (theQueue.space() >= howMany)
 	{
-		while (TinyWire.available())
-			theQueue.write(TinyWire.read());
+		//while (TinyWire.available())
+		for(int each=0;each<howMany;each++)
+		{
+			byte read = TinyWire.read();
+
+			if (!one && (read > CMD_INVERT))
+			{
+				digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
+				break;
+			}
+			one = true;
+
+			//digitalWrite(LED_WHITE, ((howMany != 5)&&(howMany != 1))?HIGH:LOW);
+
+
+			if (!theQueue.write(read))
+			{
+				digitalWrite(LED_WHITE, HIGH);
+			}
+		}
 
 		if(currentState==smIdle)
 			currentState = smPossibleWork;
 	}
-	//else
-	//{
-	//	// pipe to null
-	//	while (TinyWire.available())
-	//		TinyWire.read();
+	else
+	{
+		// pipe to null
+		//while (TinyWire.available())
+		//	TinyWire.read();
 
-	//}
+	}
 
 }
 
@@ -376,14 +439,14 @@ void onI2CRequest(void)
 
 	result = TinyWire.send(result);
 
-	if (!result)
-	{
-		digitalWrite(LED_BUILTIN, HIGH);
-	}
-	else
-	{
-		digitalWrite(LED_BUILTIN, LOW);
-	}
+	//if (!result)
+	//{
+	//	digitalWrite(LED_BUILTIN, HIGH);
+	//}
+	//else
+	//{
+	//	digitalWrite(LED_BUILTIN, LOW);
+	//}
 
 }
 
@@ -391,7 +454,11 @@ void onI2CRequest(void)
 
 void Display()
 {
+	//digitalWrite(LED_WHITE, HIGH);
+
 	ws2812_setleds(led, currentCount);
+
+	//digitalWrite(LED_WHITE, LOW);
 }
 
 

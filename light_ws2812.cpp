@@ -8,6 +8,8 @@
 * Nov 29th, 2015  v2.3  Added SK6812RGBW support
 *
 * License: GNU GPL v2+ (see License.txt)
+
+https://cpldcpu.wordpress.com/2014/01/14/light_ws2812-library-v2-0-part-i-understanding-the-ws2812/
 */
 
 #include "light_ws2812.h"
