@@ -3,8 +3,6 @@
 #include "light_ws2812.h"
 #include "ws2812_config.h"
 
-//#include <Tiny4kOLED.h>
-
 // for attiny85
 #define LED_BUILTIN		PB4
 #define LED_WHITE		PB1
@@ -25,6 +23,9 @@ struct cRGB led[MAXPIX];
 
 #include <avr\power.h>
 #include <avr\wdt.h>
+
+
+
 
 // the setup function runs once when you press reset or power the board
 void setup() 
@@ -50,13 +51,6 @@ void setup()
 		delay(200);
 	}
 
-	//oled.begin();
-	//oled.switchRenderFrame();
-	//oled.clear();
-	//oled.on();
-	//oled.write("hello!");
-	//oled.switchFrame();
-	//delay(2000);
 
 	// turn watchdog off
 	//MCUSR = 0;
@@ -73,7 +67,6 @@ void setup()
 	memset(&led, 0, sizeof(led));
 	// state stays the same
 	Display();
-
 
 }
 
@@ -117,8 +110,8 @@ bool SumpData(byte theByte)
 class circQueue
 {
 
-#define _CIRCQSIZE		16
-#define _CIRQSIZEBITS	4
+#define _CIRCQSIZE		32
+#define _CIRQSIZEBITS	5
 protected:
 
 	byte m_data[_CIRCQSIZE];
@@ -194,20 +187,12 @@ void  loop()
 		return;
 	}
 
-	//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
+	digitalWrite(LED_BUILTIN, LOW);
 
 	// loops, until all received bytes are read
 	while (theQueue.available()) 
 	{
 		byte readByte = theQueue.read();
-
-		//oled.print(readByte,HEX);
-		//oled.switchFrame();
-
-		if (readByte == 255)
-		{
-			//digitalWrite(LED_WHITE, (digitalRead(LED_WHITE) == HIGH) ? LOW : HIGH);
-		}
 
 		switch (currentState)
 		{
@@ -380,31 +365,34 @@ void  loop()
 		}
 	}
 
-	currentState = smIdle;
+	if (currentState != smPossibleWork)
+	{
+		digitalWrite(LED_BUILTIN, HIGH);
+	}
 
+	// if we leave the available loop guessing there's more, assume none
+	// clear interrupts so the ISR doesn't change this underneath us
+	cli();
+	if(currentState==smPossibleWork)
+		currentState = smIdle;
+	sei();
 }
+
 
 
 void onI2CReceive(int howMany) 
 {
-	//digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN)==HIGH)?LOW:HIGH);
-	bool one = false;
+
+	digitalWrite(LED_WHITE, LOW);
+
+	// we are NOT assured of getting all the bytes in a endTransmission in one chunk
+	// so, don't assume we will
+
 	if (theQueue.space() >= howMany)
 	{
-		//while (TinyWire.available())
-		for(int each=0;each<howMany;each++)
+		while (TinyWire.available())
 		{
 			byte read = TinyWire.read();
-
-			if (!one && (read > CMD_INVERT))
-			{
-				digitalWrite(LED_BUILTIN, (digitalRead(LED_BUILTIN) == HIGH) ? LOW : HIGH);
-				break;
-			}
-			one = true;
-
-			//digitalWrite(LED_WHITE, ((howMany != 5)&&(howMany != 1))?HIGH:LOW);
-
 
 			if (!theQueue.write(read))
 			{
@@ -420,9 +408,7 @@ void onI2CReceive(int howMany)
 		// pipe to null
 		//while (TinyWire.available())
 		//	TinyWire.read();
-
 	}
-
 }
 
 void onI2CRequest(void)
@@ -454,11 +440,7 @@ void onI2CRequest(void)
 
 void Display()
 {
-	//digitalWrite(LED_WHITE, HIGH);
-
 	ws2812_setleds(led, currentCount);
-
-	//digitalWrite(LED_WHITE, LOW);
 }
 
 
