@@ -27,14 +27,14 @@ void /*inline*/ ws2812_setleds(struct cRGB *ledarray, uint16_t leds)
 void /*inline*/ ws2812_setleds_pin(struct cRGB *ledarray, uint16_t leds, uint8_t pinmask)
 {
   ws2812_sendarray_mask((uint8_t*)ledarray,leds+leds+leds,pinmask);
-  _delay_us(ws2812_resettime);
+ // _delay_us(ws2812_resettime);
 }
 
 // Setleds for SK6812RGBW
 void /*inline*/ ws2812_setleds_rgbw(struct cRGBW *ledarray, uint16_t leds)
 {
   ws2812_sendarray_mask((uint8_t*)ledarray,leds<<2,_BV(ws2812_pin));
-  _delay_us(ws2812_resettime);
+ // _delay_us(ws2812_resettime);
 }
 
 void ws2812_sendarray(uint8_t *data,uint16_t datlen)
@@ -103,22 +103,34 @@ void ws2812_sendarray(uint8_t *data,uint16_t datlen)
 #define w_nop8  w_nop4 w_nop4
 #define w_nop16 w_nop8 w_nop8
 
+
+#define _CLI_ALREADY_DONE
+
 void inline ws2812_sendarray_mask(uint8_t *data,uint16_t datlen,uint8_t maskhi)
 {
   uint8_t curbyte,ctr,masklo;
+
+#ifndef  _CLI_ALREADY_DONE
   uint8_t sreg_prev;
-  
+#endif
+
   ws2812_DDRREG |= maskhi; // Enable output
   
   masklo	=~maskhi&ws2812_PORTREG;
   maskhi |=        ws2812_PORTREG;
   
-  sreg_prev=SREG;
-  cli();  
+#ifndef  _CLI_ALREADY_DONE
+
+  sreg_prev = SREG;
+  cli();
+
+#endif // ! _CLI_OFTEN
+
 
   while (datlen--) {
     curbyte=*data++;
-    
+
+
     asm volatile(
     "       ldi   %0,8  \n\t"
     "loop%=:            \n\t"
@@ -178,7 +190,10 @@ w_nop16
     :	"=&d" (ctr)
     :	"r" (curbyte), "I" (_SFR_IO_ADDR(ws2812_PORTREG)), "r" (maskhi), "r" (masklo)
     );
+
   }
   
+#ifndef  _CLI_ALREADY_DONE
   SREG=sreg_prev;
+#endif
 }
