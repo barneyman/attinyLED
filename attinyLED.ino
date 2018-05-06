@@ -350,6 +350,10 @@ void get_mcusr(void)
 	wdt_disable();
 }
 
+#define _DISPLAY_IN_LOOP
+#ifdef _DISPLAY_IN_LOOP
+volatile bool displayNow = false;
+#endif
 
 void  loop()
 {
@@ -363,6 +367,12 @@ void  loop()
 		sleep_mode();                        // System actually sleeps here
 		sleep_disable();                     // System continues execution here when watchdog timed out 
 #endif
+	}
+
+	if (displayNow)
+	{
+		Display();
+		displayNow = false;
 	}
 }
 
@@ -519,7 +529,11 @@ void HandleQueue()
 				currentState = smPossibleWork;
 				break;
 			case CMD_DISPLAY:
+#ifdef _DISPLAY_IN_LOOP
+				displayNow = true;
+#else
 				Display();
+#endif
 				currentState = smPossibleWork;
 				break;
 			case CMD_SIZE:
@@ -601,12 +615,39 @@ void onI2CRequest(void)
 	TinyWire.send(result);
 }
 
-#define _FAKE
+//#define _FAKE
 
 void Display()
 {
-#ifdef _FAKE
 	digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN)==HIGH?LOW:HIGH);
+#ifdef _FAKE
+	
+	// sleep for a bit
+	for(unsigned loop=0;loop<50;loop++)
+	for (unsigned count = 0; count < sizeof(led); count++)
+	{
+		asm volatile( 
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			"nop\n\t"
+			);
+	}
+	
 	//for (int blink = 0; blink < 5; blink++)
 	//{
 	//	digitalWrite(LED_BUILTIN, HIGH);

@@ -132,9 +132,9 @@ void inline ws2812_sendarray_mask(uint8_t *data,uint16_t datlen,uint8_t maskhi)
 
 
     asm volatile(
-    "       ldi   %0,8  \n\t"
+    "       ldi   %0,8  \n\t"	// loadImmediate 8 into ctr
     "loop%=:            \n\t"
-    "       out   %2,%3 \n\t"    //  '1' [01] '0' [01] - re
+    "       out   %2,%3 \n\t"    //  '1' [01] '0' [01] - re // push HI out to port?
 #if (w1_nops&1)
 w_nop1
 #endif
@@ -150,9 +150,9 @@ w_nop8
 #if (w1_nops&16)
 w_nop16
 #endif
-    "       sbrs  %1,7  \n\t"    //  '1' [03] '0' [02]
-    "       out   %2,%4 \n\t"    //  '1' [--] '0' [03] - fe-low
-    "       lsl   %1    \n\t"    //  '1' [04] '0' [04]
+    "       sbrs  %1,7  \n\t"    //  '1' [03] '0' [02] // skip next instruction if bit7 set in data
+    "       out   %2,%4 \n\t"    //  '1' [--] '0' [03] - fe-low // push LOW out of led port ?
+    "       lsl   %1    \n\t"    //  '1' [04] '0' [04] // left shift data
 #if (w2_nops&1)
   w_nop1
 #endif
@@ -168,7 +168,7 @@ w_nop16
 #if (w2_nops&16)
   w_nop16 
 #endif
-    "       out   %2,%4 \n\t"    //  '1' [+1] '0' [+1] - fe-high
+    "       out   %2,%4 \n\t"    //  '1' [+1] '0' [+1] - fe-high // push LOW out of led port ?
 #if (w3_nops&1)
 w_nop1
 #endif
@@ -185,8 +185,8 @@ w_nop8
 w_nop16
 #endif
 
-    "       dec   %0    \n\t"    //  '1' [+2] '0' [+2]
-    "       brne  loop%=\n\t"    //  '1' [+3] '0' [+4]
+    "       dec   %0    \n\t"    //  '1' [+2] '0' [+2]	// decrement counter
+    "       brne  loop%=\n\t"    //  '1' [+3] '0' [+4]	// branch NEQ to loop
     :	"=&d" (ctr)
     :	"r" (curbyte), "I" (_SFR_IO_ADDR(ws2812_PORTREG)), "r" (maskhi), "r" (masklo)
     );
