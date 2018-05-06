@@ -99,13 +99,15 @@ byte currentCount = MAXPIX;
 
 
 
-
+#define _DISABLE_TIMER
 
 // the setup function runs once when you press reset or power the board
 void setup() 
 {
 	// power
+
 	ADCSRA &= ~(1 << ADEN); //Disable ADC, saves ~230uA
+
 
 
 #ifdef 	_USE_PALETTE
@@ -132,10 +134,19 @@ void setup()
 		delay(200);
 	}
 
+#ifdef _DISABLE_TIMER
+	// turn timer0 off, it MAY help with the i2c lockups?
+	// it may have made a difference ... not convinced
+	TCCR0B &= 0B11111000;
+
+
+
+#endif
+
 
 	// turn watchdog off
-	//MCUSR = 0;
-	//wdt_disable();
+	MCUSR = 0;
+	wdt_disable();
 
 	// clear the LEDS
 	memset(&led, 0, sizeof(led));
@@ -590,11 +601,26 @@ void onI2CRequest(void)
 	TinyWire.send(result);
 }
 
-
+#define _FAKE
 
 void Display()
 {
+#ifdef _FAKE
+	digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN)==HIGH?LOW:HIGH);
+	//for (int blink = 0; blink < 5; blink++)
+	//{
+	//	digitalWrite(LED_BUILTIN, HIGH);
+	//	for (int loop = 0; loop < 1000; loop++);
+	//	digitalWrite(LED_BUILTIN, LOW);
+	//	for (int loop = 0; loop < 1000; loop++);
+	//	digitalWrite(LED_BUILTIN, HIGH);
+	//	for (int loop = 0; loop < 1000; loop++);
+	//	digitalWrite(LED_BUILTIN, LOW);
+	//}
+
+#else
 	ws2812_setleds(led, currentCount);
+#endif
 }
 
 
