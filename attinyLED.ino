@@ -3,36 +3,41 @@
 #include "light_ws2812.h"
 #include "ws2812_config.h"
 
+//#define _XSISTOR_FOR_ON PB1
+
 // for attiny85
 #define LED_BUILTIN		PB4
+
+#ifndef _XSISTOR_FOR_ON
 #define LED_WHITE		PB1
+#endif
+
 
 #define I2C_ADDR	0x10
 
-// 120 = 2m @60pm or 4 metres @30pm
-// 60 = 1m @60pm or 2 metres @30pm
 
-
-//#define _USE_PALETTE
+#define _USE_PALETTE
 
 #ifdef _USE_PALETTE
 
-const struct cRGB ledPalette[] PROGMEM = {
+//const struct cRGB ledPalette[] PROGMEM = {
+// WARNING - GR Rd Bl !!!!!
+const struct cRGBW ledPalette[] = {
 	{ 0, 0, 0 },		// black
 	{ 255, 255, 255 },	// white
-	{ 255,0,0 },		// red
-	{ 0, 255, 0 },		// lime
+	{ 0,255,0 },		// red
+	{ 255,0,  0 },		// lime
 	{ 0,0,255 },		// blue
 	{ 255,255,0 },		// yellow
-	{ 0,255,255 },		// cyan
-	{ 255,0,255 },		// magenta
-	{ 192,192,192 },		// silver
-	{ 128,128,128 },		// grey
-	{ 128,0,0 },			// maroon
+	{ 255,0,255 },		// cyan
+	{ 0,255,255 },		// magenta
+	{ 192,192,192 },	// silver
+	{ 128,128,128 },	// grey
+	{ 0,128,0 },		// maroon
 	{ 128,128,0 },		// olive
-	{ 0,128,0 },			// green
-	{ 128,0,128 },		// purple
-	{ 0,128,128 },		// teal
+	{ 128,0,0 },		// green
+	{ 0,128,128 },		// purple
+	{ 128,0,128 },		// teal
 	{ 0,0,128 }			// navy
 
 };
@@ -53,41 +58,66 @@ const struct cRGB ledPalette[] PROGMEM = {
 #define _COLOR_PALLETE_PURPLE		13
 #define _COLOR_PALLETE_TEAL			14
 #define _COLOR_PALLETE_NAVY			15
-#define _COLOR_PALLETE_USER1		16
-#define _COLOR_PALLETE_USER2		17
-#define _COLOR_PALLETE_USER3		18
-#define _COLOR_PALLETE_USER4		19
-#define _COLOR_PALLETE_USER5		20
-#define _COLOR_PALLETE_USER6		21
-#define _COLOR_PALLETE_USER7		22
-#define _COLOR_PALLETE_USER8		23
-#define _COLOR_PALLETE_USER9		24
-#define _COLOR_PALLETE_USER10		25
-#define _COLOR_PALLETE_USER11		26
-#define _COLOR_PALLETE_USER12		27
-#define _COLOR_PALLETE_USER13		28
-#define _COLOR_PALLETE_USER14		29
-#define _COLOR_PALLETE_USER15		30
-#define _COLOR_PALLETE_USER16		31
+//#define _COLOR_PALLETE_USER1		16
+//#define _COLOR_PALLETE_USER2		17
+//#define _COLOR_PALLETE_USER3		18
+//#define _COLOR_PALLETE_USER4		19
+//#define _COLOR_PALLETE_USER5		20
+//#define _COLOR_PALLETE_USER6		21
+//#define _COLOR_PALLETE_USER7		22
+//#define _COLOR_PALLETE_USER8		23
+//#define _COLOR_PALLETE_USER9		24
+//#define _COLOR_PALLETE_USER10		25
+//#define _COLOR_PALLETE_USER11		26
+//#define _COLOR_PALLETE_USER12		27
+//#define _COLOR_PALLETE_USER13		28
+//#define _COLOR_PALLETE_USER14		29
+//#define _COLOR_PALLETE_USER15		30
+//#define _COLOR_PALLETE_USER16		31
 
-#define MAXPIX 2
-
-
-byte leds[300];
+// 5m @ 60pm 
+#define MAXPIX 200
+byte led[MAXPIX];
 struct cRGB userPalette[8];
 
 #else
 
+// 120 = 2m @60pm or 4 metres @30pm
+// 60 = 1m @60pm or 2 metres @30pm
 #define MAXPIX 90
+struct cRGB led[MAXPIX];
 
 #endif
 
 
-struct cRGB led[MAXPIX];
+
+
+// requestData returned flags
+#define _FLAG_ROOM_IN_QUEUE	128
+#define _FLAG_QUEUE_FLUSHED	64
+#define _FLAG_PALETTE_MODE	32
+
+// sendData commands
+#define CMD_RESET	0	// turn it all off
+#define CMD_SIZE	1	// actual number of LEDS
+#define CMD_SETALL	2	// set all leds to RGB
+#define CMD_SETONE	3	// set a single led - offset(0) RGB
+#define CMD_SHIFT	4	// shift current set - signed byte (for L and R) RGB replace
+//#define CMD_ROLL	5	// roll - signed byte
+#define CMD_DISPLAY	6	// shunt out to the LEDS - beware, interrupts get cleared, so I2C will fail
+#define CMD_INVERT	7	// invert all rgbs
+// only works when _XSISTOR_FOR_ON define
+#define CMD_ON		8	// + on/off byte
+#define CMD_OFF		9	// + on/off byte
+// palette commands
+#define CMD_SETALL_PALETTE		10	// set all leds to RGB
+#define CMD_SETONE_PALETTE		11	// set a single led - offset(0) RGB
+#define CMD_SHIFT_PALETTE		12	// shift current set - signed byte (for L and R) RGB replace
+
 
 
 // how many leds we actually have
-byte currentCount = MAXPIX;
+unsigned currentCount = MAXPIX;
 
 
 
@@ -104,33 +134,43 @@ byte currentCount = MAXPIX;
 // the setup function runs once when you press reset or power the board
 void setup() 
 {
+	// settle down!
+	delay(200);
+
 	// power
 
 	ADCSRA &= ~(1 << ADEN); //Disable ADC, saves ~230uA
 
 
 
-#ifdef 	_USE_PALETTE
-	// just to stop the linker hosing an unused array
-	memset(&leds, 0, sizeof(leds));
-	memset(&userPalette, 0, sizeof(userPalette));
-#endif
 
 
 	// initialize digital pin LED_BUILTIN as an output.
 	pinMode(LED_BUILTIN, OUTPUT);
+#ifdef _XSISTOR_FOR_ON
+	pinMode(_XSISTOR_FOR_ON, OUTPUT);
+#else
 	pinMode(LED_WHITE, OUTPUT);
+#endif
 
 	digitalWrite(LED_BUILTIN, LOW);
+#ifdef _XSISTOR_FOR_ON
+	digitalWrite(_XSISTOR_FOR_ON, LOW);
+#else
 	digitalWrite(LED_WHITE, LOW);
+#endif
 
 	for(int flash=0;flash<3;flash++)
 	{
 		digitalWrite(LED_BUILTIN, HIGH);
+#ifndef _XSISTOR_FOR_ON
 		digitalWrite(LED_WHITE, HIGH);
+#endif
 		delay(200);
 		digitalWrite(LED_BUILTIN, LOW);
+#ifndef _XSISTOR_FOR_ON
 		digitalWrite(LED_WHITE, LOW);
+#endif
 		delay(200);
 	}
 
@@ -150,6 +190,11 @@ void setup()
 
 	// clear the LEDS
 	memset(&led, 0, sizeof(led));
+
+#ifdef 	_USE_PALETTE
+	memset(&userPalette, 0, sizeof(userPalette));
+#endif
+
 	// state stays the same
 	Display();
 
@@ -164,18 +209,13 @@ void setup()
 }
 
 
-enum stateMachine { smIdle=0, smPossibleWork=20, smSizing=100, smSetAll, smSetOne, smShifting, smRolling, smInverting } ;
+enum stateMachine {		smIdle=0, smPossibleWork=20, smSizing=30, 
+						smSetAll=40, smSetOne, smShifting, smRolling, smInverting,
+						smSetAllPalette=50, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette
+				} ;
 
 volatile stateMachine currentState = stateMachine::smIdle;
 
-#define CMD_RESET	0	// turn it all off
-#define CMD_SIZE	1	// actual number of LEDS
-#define CMD_SETALL	2	// set all leds to RGB
-#define CMD_SETONE	3	// set a single led - offset(0) RGB
-#define CMD_SHIFT	4	// shift current set - signed byte (for L and R) RGB replace
-//#define CMD_ROLL	5	// roll - signed byte
-#define CMD_DISPLAY	6	// shunt out to the LEDS - beware, interrupts get cleared, so I2C will fail
-#define CMD_INVERT	7	// invert all rgbs
 
 // size of the biggest command data (less the command byte)
 #define MAX_Q_DATA					4
@@ -369,10 +409,29 @@ void  loop()
 #endif
 	}
 
-	if (displayNow)
+#ifndef _DISABLE_TIMER
+	int status = TinyWire.status();
+	if (status != 0)
 	{
-		Display();
-		displayNow = false;
+		for (int flash = 0; flash < status; flash++)
+		{
+			digitalWrite(LED_WHITE, HIGH);
+			delay(200);
+			digitalWrite(LED_WHITE, LOW);
+			delay(200);
+		}
+
+		delay(1000);
+	}
+	else
+#endif
+	{
+
+		if (displayNow)
+		{
+			Display();
+			displayNow = false;
+		}
 	}
 }
 
@@ -406,15 +465,44 @@ void HandleQueue()
 				currentState = smPossibleWork;
 			}
 			break;
+		case smSetAllPalette:
+			if (SumpData(readByte))
+			{
+#ifdef _USE_PALETTE
+				for (unsigned each = 0; each < currentCount; each++)
+				{
+					led[each] = (uint8_t)data[0];
+				}
+#endif
+				// go around again
+				currentState = smPossibleWork;
+			}
+			break;
 		case smSetAll:
 			if (SumpData(readByte))
 			{
+#ifndef _USE_PALETTE
 				for (unsigned each = 0; each < currentCount; each++)
 				{
 					led[each].r = (uint8_t)data[0];
 					led[each].g = (uint8_t)data[1];
 					led[each].b = (uint8_t)data[2];
 				}
+#endif
+				// go around again
+				currentState = smPossibleWork;
+			}
+			break;
+		case smSetOnePalette:
+			if (SumpData(readByte))
+			{
+#ifdef _USE_PALETTE
+				uint8_t offset = (uint8_t)data[0];
+				if (offset < currentCount)
+				{
+					led[(uint8_t)offset] = (uint8_t)data[1];
+				}
+#endif
 				// go around again
 				currentState = smPossibleWork;
 			}
@@ -422,6 +510,7 @@ void HandleQueue()
 		case smSetOne:
 			if (SumpData(readByte))
 			{
+#ifndef _USE_PALETTE
 				uint8_t offset = (uint8_t)data[0];
 				if (offset < currentCount)
 				{
@@ -429,6 +518,7 @@ void HandleQueue()
 					led[(uint8_t)offset].g = (uint8_t)data[2];
 					led[(uint8_t)offset].b = (uint8_t)data[3];
 				}
+#endif
 				// go around again
 				currentState = smPossibleWork;
 			}
@@ -464,9 +554,52 @@ void HandleQueue()
 				}
 #endif
 				break;
+		case smShiftingPalette:
+			if (SumpData(readByte))
+			{
+#ifdef _USE_PALETTE
+				signed char offset = (signed char)data[0];
+				// if there's no offset, there's nothing to do!
+				if (offset)
+				{
+					int source = 0, dest = 0, size = currentCount, fillStart;
+					if (offset > 0)
+					{
+						// shift right
+						dest += offset;
+						fillStart = 0;
+					}
+					else
+					{
+						// shift left
+						// yes - double negative
+						source -= offset;
+						fillStart = currentCount + offset;
+					}
+
+					size -= abs(offset);
+
+					// shift
+					memmove(&led[dest], &led[source], sizeof(led[source])*size);
+
+					// then fill the void ones
+					size = abs(offset);
+
+					for (unsigned fill = fillStart; size; size--, fill++)
+					{
+						led[fill] = (uint8_t)data[1];
+					}
+
+				}
+#endif
+				currentState = smPossibleWork;
+			}
+			break;
+
 		case smShifting:
 			if (SumpData(readByte))
 			{
+#ifndef _USE_PALETTE
 				signed char offset = (signed char)data[0];
 				// if there's no offset, there's nothing to do!
 				if (offset)
@@ -502,13 +635,28 @@ void HandleQueue()
 					}
 
 				}
+#endif
 				currentState = smPossibleWork;
 			}
 			break;
-
+		case smInvertingPalette:
+			if (SumpData(readByte))
+			{
+#ifdef _USE_PALETTE
+				// TODO - this doesnt work, logically
+				int mask = data[0];
+				for (unsigned each = 0; each < currentCount; each++)
+				{
+					led[each] = (~led[each])&mask;
+				}
+#endif
+				currentState = smPossibleWork;
+			}
+			break;
 		case smInverting:
 			if (SumpData(readByte))
 			{
+#ifndef _USE_PALETTE
 				int mask = data[0];
 				for (unsigned each = 0; each < currentCount; each++)
 				{
@@ -516,13 +664,26 @@ void HandleQueue()
 					led[each].g = (~led[each].g)&mask;
 					led[each].b = (~led[each].b)&mask;
 				}
+#endif
+				currentState = smPossibleWork;
 			}
-			currentState = smPossibleWork;
 			break;
 			//case smIdle:
 		case smPossibleWork:
 			switch (readByte)
 			{
+			case CMD_ON:
+#ifdef _XSISTOR_FOR_ON
+				digitalWrite(_XSISTOR_FOR_ON, HIGH);
+#endif
+				currentState = smPossibleWork;
+				break;
+			case CMD_OFF:
+#ifdef _XSISTOR_FOR_ON
+				digitalWrite(_XSISTOR_FOR_ON, LOW);
+#endif
+				currentState = smPossibleWork;
+				break;
 			case CMD_RESET:
 				memset(&led, 0, sizeof(led));
 				// state stays the same
@@ -539,11 +700,20 @@ void HandleQueue()
 			case CMD_SIZE:
 				NEED_DATA(smSizing, 1);
 				break;
+			case CMD_SETALL_PALETTE:
+				NEED_DATA(smSetAllPalette, 1);
+				break;
 			case CMD_SETALL:
 				NEED_DATA(smSetAll, 3);
 				break;
+			case CMD_SETONE_PALETTE:
+				NEED_DATA(smSetOnePalette, 2);
+				break;
 			case CMD_SETONE:
 				NEED_DATA(smSetOne, 4);
+				break;
+			case CMD_SHIFT_PALETTE:
+				NEED_DATA(smShiftingPalette, 2);
 				break;
 			case CMD_SHIFT:
 				NEED_DATA(smShifting, 4);
@@ -597,6 +767,7 @@ void onI2CReceive(int howMany)
 
 }
 
+
 void onI2CRequest(void)
 {
 
@@ -605,62 +776,29 @@ void onI2CRequest(void)
 	// if we have more space left then biggest command + data ..
 	if (theQueue.space() == _CIRCQSIZE)
 	{
-		result |= 64;
+		result |= _FLAG_QUEUE_FLUSHED;
 	}
 	else if (theQueue.space() >= (MAX_Q_COMMAND_AND_DATA))
 	{
-		result |= 128;
+		result |= _FLAG_ROOM_IN_QUEUE;
 	}
+
+#ifdef _USE_PALETTE
+	result |= _FLAG_PALETTE_MODE;
+#endif
 
 	TinyWire.send(result);
 }
 
-//#define _FAKE
-
 void Display()
 {
-	digitalWrite(LED_BUILTIN, digitalRead(LED_BUILTIN)==HIGH?LOW:HIGH);
-#ifdef _FAKE
-	
-	// sleep for a bit
-	for(unsigned loop=0;loop<50;loop++)
-	for (unsigned count = 0; count < sizeof(led); count++)
-	{
-		asm volatile( 
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			"nop\n\t"
-			);
-	}
-	
-	//for (int blink = 0; blink < 5; blink++)
-	//{
-	//	digitalWrite(LED_BUILTIN, HIGH);
-	//	for (int loop = 0; loop < 1000; loop++);
-	//	digitalWrite(LED_BUILTIN, LOW);
-	//	for (int loop = 0; loop < 1000; loop++);
-	//	digitalWrite(LED_BUILTIN, HIGH);
-	//	for (int loop = 0; loop < 1000; loop++);
-	//	digitalWrite(LED_BUILTIN, LOW);
-	//}
-
-#else
+#ifndef _USE_PALETTE
 	ws2812_setleds(led, currentCount);
+#else
+	ws2812_sendarray_mask_palette(ledPalette, led, currentCount, _BV(ws2812_pin));
+
+
+	ws2812_setleds(userPalette, currentCount);
 #endif
 }
 

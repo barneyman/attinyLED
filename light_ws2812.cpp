@@ -27,14 +27,14 @@ void /*inline*/ ws2812_setleds(struct cRGB *ledarray, uint16_t leds)
 void /*inline*/ ws2812_setleds_pin(struct cRGB *ledarray, uint16_t leds, uint8_t pinmask)
 {
   ws2812_sendarray_mask((uint8_t*)ledarray,leds+leds+leds,pinmask);
- // _delay_us(ws2812_resettime);
+  _delay_us(ws2812_resettime);
 }
 
 // Setleds for SK6812RGBW
 void /*inline*/ ws2812_setleds_rgbw(struct cRGBW *ledarray, uint16_t leds)
 {
   ws2812_sendarray_mask((uint8_t*)ledarray,leds<<2,_BV(ws2812_pin));
- // _delay_us(ws2812_resettime);
+  _delay_us(ws2812_resettime);
 }
 
 void ws2812_sendarray(uint8_t *data,uint16_t datlen)
@@ -104,27 +104,19 @@ void ws2812_sendarray(uint8_t *data,uint16_t datlen)
 #define w_nop16 w_nop8 w_nop8
 
 
-#define _CLI_ALREADY_DONE
-
 void inline ws2812_sendarray_mask(uint8_t *data,uint16_t datlen,uint8_t maskhi)
 {
   uint8_t curbyte,ctr,masklo;
 
-#ifndef  _CLI_ALREADY_DONE
   uint8_t sreg_prev;
-#endif
 
   ws2812_DDRREG |= maskhi; // Enable output
   
   masklo	=~maskhi&ws2812_PORTREG;
   maskhi |=        ws2812_PORTREG;
   
-#ifndef  _CLI_ALREADY_DONE
-
   sreg_prev = SREG;
   cli();
-
-#endif // ! _CLI_OFTEN
 
 
   while (datlen--) {
@@ -193,7 +185,104 @@ w_nop16
 
   }
   
-#ifndef  _CLI_ALREADY_DONE
   SREG=sreg_prev;
+}
+
+
+#include <avr/pgmspace.h>
+
+// passed as RGBW *only* to make the ASM math simpler (ie *4 == <<2 instead of *3)
+void ws2812_sendarray_mask_palette(const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen, uint8_t maskhi)
+{
+	uint8_t curbyte, ctr, masklo;
+
+	uint8_t sreg_prev;
+
+	ws2812_DDRREG |= maskhi; // Enable output
+
+	masklo = ~maskhi&ws2812_PORTREG;
+	maskhi |= ws2812_PORTREG;
+
+	sreg_prev = SREG;
+	cli();
+
+
+	while (datlen--) 
+	{
+
+		const uint8_t *componentDataAddress =
+			(uint8_t*)&paletteArray[*data++];
+			//((uint8_t*)paletteArray) + ((*data++) * sizeof(cRGBW));
+
+
+		for (uint8_t component = 0; component < 3; component++)
+		{
+
+			//curbyte = pgm_read_byte(componentDataAddress++);
+			curbyte = *componentDataAddress++;
+
+
+			asm volatile(
+				"       ldi   %0,8  \n\t"	// loadImmediate 8 into ctr
+				"loop%=:            \n\t"
+				"       out   %2,%3 \n\t"    //  '1' [01] '0' [01] - re // push HI out to port?
+#if (w1_nops&1)
+				w_nop1
 #endif
+#if (w1_nops&2)
+				w_nop2
+#endif
+#if (w1_nops&4)
+				w_nop4
+#endif
+#if (w1_nops&8)
+				w_nop8
+#endif
+#if (w1_nops&16)
+				w_nop16
+#endif
+				"       sbrs  %1,7  \n\t"    //  '1' [03] '0' [02] // skip next instruction if bit7 set in data
+				"       out   %2,%4 \n\t"    //  '1' [--] '0' [03] - fe-low // push LOW out of led port ?
+				"       lsl   %1    \n\t"    //  '1' [04] '0' [04] // left shift data
+#if (w2_nops&1)
+				w_nop1
+#endif
+#if (w2_nops&2)
+				w_nop2
+#endif
+#if (w2_nops&4)
+				w_nop4
+#endif
+#if (w2_nops&8)
+				w_nop8
+#endif
+#if (w2_nops&16)
+				w_nop16
+#endif
+				"       out   %2,%4 \n\t"    //  '1' [+1] '0' [+1] - fe-high // push LOW out of led port ?
+#if (w3_nops&1)
+				w_nop1
+#endif
+#if (w3_nops&2)
+				w_nop2
+#endif
+#if (w3_nops&4)
+				w_nop4
+#endif
+#if (w3_nops&8)
+				w_nop8
+#endif
+#if (w3_nops&16)
+				w_nop16
+#endif
+
+				"       dec   %0    \n\t"    //  '1' [+2] '0' [+2]	// decrement counter
+				"       brne  loop%=\n\t"    //  '1' [+3] '0' [+4]	// branch NEQ to loop
+				:	"=&d" (ctr)
+				: "r" (curbyte), "I" (_SFR_IO_ADDR(ws2812_PORTREG)), "r" (maskhi), "r" (masklo)
+				);
+		}
+	}
+
+	SREG = sreg_prev;
 }
