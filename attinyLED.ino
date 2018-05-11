@@ -3,6 +3,17 @@
 #include "light_ws2812.h"
 #include "ws2812_config.h"
 
+
+// define this to use the canned palette = it allows access to more LEDS (because each is referenced by one byte, not 3)
+#define _USE_PALETTE
+#define _PALETTE_IN_PROGMEM
+
+// I2C address used by this chip - feel free to change it 
+#define I2C_ADDR	0x10
+
+
+
+
 //#define _XSISTOR_FOR_ON PB1
 
 // for attiny85
@@ -13,13 +24,12 @@
 #endif
 
 
-#define I2C_ADDR	0x10
 
 
-#define _USE_PALETTE
-#define _PALETTE_IN_PROGMEM
 
 #ifdef _USE_PALETTE
+
+// YES - these palettes are 4 bytes wide, even tho only 3 are used - it makes the chip math easier in the display functions
 
 uint8_t paletteDiv = 0;
 
@@ -64,8 +74,6 @@ const struct cRGBW ledPalette[] = {
 #define _COLOR_PALLETE_PURPLE		13
 #define _COLOR_PALLETE_TEAL			14
 #define _COLOR_PALLETE_NAVY			15
-
-#define _IS_COLOUR_USER_PALETTE(x)	(x&16)
 
 #define _COLOR_PALLETE_USER1		16
 #define _COLOR_PALLETE_USER2		17
@@ -130,7 +138,7 @@ unsigned currentCount = MAXPIX;
 
 
 
-
+// this turns off the delay() timer
 #define _DISABLE_TIMER
 
 // the setup function runs once when you press reset or power the board
@@ -168,7 +176,7 @@ void setup()
 #ifndef _XSISTOR_FOR_ON
 		digitalWrite(LED_WHITE, HIGH);
 #endif
-		delay(200);
+		delay(100);
 		digitalWrite(LED_BUILTIN, LOW);
 #ifndef _XSISTOR_FOR_ON
 		digitalWrite(LED_WHITE, LOW);
