@@ -64,27 +64,22 @@ const struct cRGBW ledPalette[] = {
 #define _COLOR_PALLETE_PURPLE		13
 #define _COLOR_PALLETE_TEAL			14
 #define _COLOR_PALLETE_NAVY			15
-//#define _COLOR_PALLETE_USER1		16
-//#define _COLOR_PALLETE_USER2		17
-//#define _COLOR_PALLETE_USER3		18
-//#define _COLOR_PALLETE_USER4		19
-//#define _COLOR_PALLETE_USER5		20
-//#define _COLOR_PALLETE_USER6		21
-//#define _COLOR_PALLETE_USER7		22
-//#define _COLOR_PALLETE_USER8		23
-//#define _COLOR_PALLETE_USER9		24
-//#define _COLOR_PALLETE_USER10		25
-//#define _COLOR_PALLETE_USER11		26
-//#define _COLOR_PALLETE_USER12		27
-//#define _COLOR_PALLETE_USER13		28
-//#define _COLOR_PALLETE_USER14		29
-//#define _COLOR_PALLETE_USER15		30
-//#define _COLOR_PALLETE_USER16		31
+
+#define _IS_COLOUR_USER_PALETTE(x)	(x&16)
+
+#define _COLOR_PALLETE_USER1		16
+#define _COLOR_PALLETE_USER2		17
+#define _COLOR_PALLETE_USER3		18
+#define _COLOR_PALLETE_USER4		19
+#define _COLOR_PALLETE_USER5		20
+#define _COLOR_PALLETE_USER6		21
+#define _COLOR_PALLETE_USER7		22
+#define _COLOR_PALLETE_USER8		23
 
 // 5m @ 60pm 
-#define MAXPIX 200
+#define MAXPIX 300
 byte led[MAXPIX];
-struct cRGB userPalette[8];
+struct cRGBW userPalette[8];
 
 #else
 
@@ -816,9 +811,9 @@ void Display()
 	ws2812_setleds(led, currentCount);
 #else
 #ifdef _PALETTE_IN_PROGMEM
-	ws2812_sendarray_mask_palette(true, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
+	ws2812_sendarray_mask_palette(userPalette,true, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
 #else
-	ws2812_sendarray_mask_palette(false, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
+	ws2812_sendarray_mask_palette(userPalette,false, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
 #endif
 #endif
 }

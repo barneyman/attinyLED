@@ -56,7 +56,7 @@ void ws2812_setleds_rgbw(struct cRGBW *ledarray, uint16_t number_of_leds);
 void ws2812_sendarray     (uint8_t *array,uint16_t length);
 void ws2812_sendarray_mask(uint8_t *array,uint16_t length, uint8_t pinmask);
 
-void ws2812_sendarray_mask_palette(bool paletteInProgmem, const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen,unsigned char paletteDivLocal, uint8_t maskhi);
+void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, bool paletteInProgmem, const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen,unsigned char paletteDivLocal, uint8_t maskhi);
 
 
 /*
