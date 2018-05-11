@@ -78,8 +78,9 @@ const struct cRGBW ledPalette[] = {
 
 // 5m @ 60pm 
 #define MAXPIX 300
+#define MAX_USER_PALETTE	8
 byte led[MAXPIX];
-struct cRGBW userPalette[8];
+struct cRGBW userPalette[MAX_USER_PALETTE];
 
 #else
 
@@ -115,7 +116,7 @@ struct cRGB led[MAXPIX];
 #define CMD_SETONE_PALETTE		11	// set a single led - offset(0) RGB
 #define CMD_SHIFT_PALETTE		12	// shift current set - signed byte (for L and R) RGB replace
 #define CMD_DIV_PALETTE			13	// apply div to palette colours - one byte = rgb >> div
-
+#define CMD_USER_PALETTE_SET	14	// set one of the user colours - 4 bytes - offset r g b 
 
 // how many leds we actually have
 unsigned currentCount = MAXPIX;
@@ -212,7 +213,7 @@ void setup()
 
 enum stateMachine {		smIdle=0, smPossibleWork=20, smSizing=30, 
 						smSetAll=40, smSetOne, smShifting, smRolling, smInverting,
-						smSetAllPalette=50, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette
+						smSetAllPalette=50, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette, smUserPalette
 				} ;
 
 volatile stateMachine currentState = stateMachine::smIdle;
@@ -465,6 +466,26 @@ void HandleQueue()
 				currentState = smPossibleWork;
 			}
 			break;
+
+		case smUserPalette:
+			if (SumpData(readByte))
+			{
+				int offset = data[0];
+				offset -= _COLOR_PALLETE_USER1;
+
+				if (offset < MAX_USER_PALETTE)
+				{
+
+					userPalette[offset].r = data[1];
+					userPalette[offset].g = data[2];
+					userPalette[offset].b = data[3];
+				}
+
+				// go around again
+				currentState = smPossibleWork;
+			}
+			break;
+
 		case smSizing:
 			if (SumpData(readByte))
 			{
@@ -735,6 +756,9 @@ void HandleQueue()
 				break;
 			case CMD_INVERT:
 				NEED_DATA(smInverting, 1);
+				break;
+			case CMD_USER_PALETTE_SET:
+				NEED_DATA(smUserPalette, 4);
 				break;
 
 #ifdef CMD_ROLL

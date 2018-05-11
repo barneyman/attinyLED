@@ -217,7 +217,9 @@ void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, bool pa
 		// check it's a user colour
 		if (*data & 0x10)
 		{
-			componentDataAddress = (uint8_t*)&userPaletteArray[*data++];
+			// get it back into the right range
+			componentDataAddress = (uint8_t*)&userPaletteArray[(*data)-16];
+			data++;
 			// can't be!
 			paletteInProgmemConfirmed = false;
 		}
@@ -237,6 +239,9 @@ void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, bool pa
 				asm volatile(
 					// there is some strange voodoo magic with which registers actually honour Z flag tests ?
 					// life was much simpler in 6502 :)
+
+					"		tst %0 \n\t"
+					"		breq divDone%= \n\t"	// if !curbyte skip the div
 
 					"		mov r0, %2 \n\t"		// move div into r0 (temp register) - marked as clobbered (1 cyc)
 					"		tst r0 \n\t"			// test it (1 cyc)
