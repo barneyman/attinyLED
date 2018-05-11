@@ -17,12 +17,18 @@
 
 
 #define _USE_PALETTE
+#define _PALETTE_IN_PROGMEM
 
 #ifdef _USE_PALETTE
 
-//const struct cRGB ledPalette[] PROGMEM = {
-// WARNING - GR Rd Bl !!!!!
+uint8_t paletteDiv = 0;
+
+#ifdef _PALETTE_IN_PROGMEM
+const struct cRGBW ledPalette[] PROGMEM = {
+#else
 const struct cRGBW ledPalette[] = {
+#endif
+// WARNING - GR Rd Bl !!!!!
 	{ 0, 0, 0 },		// black
 	{ 255, 255, 255 },	// white
 	{ 0,255,0 },		// red
@@ -113,7 +119,7 @@ struct cRGB led[MAXPIX];
 #define CMD_SETALL_PALETTE		10	// set all leds to RGB
 #define CMD_SETONE_PALETTE		11	// set a single led - offset(0) RGB
 #define CMD_SHIFT_PALETTE		12	// shift current set - signed byte (for L and R) RGB replace
-
+#define CMD_DIV_PALETTE			13	// apply div to palette colours - one byte = rgb >> div
 
 
 // how many leds we actually have
@@ -211,7 +217,7 @@ void setup()
 
 enum stateMachine {		smIdle=0, smPossibleWork=20, smSizing=30, 
 						smSetAll=40, smSetOne, smShifting, smRolling, smInverting,
-						smSetAllPalette=50, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette
+						smSetAllPalette=50, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette
 				} ;
 
 volatile stateMachine currentState = stateMachine::smIdle;
@@ -453,6 +459,17 @@ void HandleQueue()
 
 		switch (currentState)
 		{
+		case smDivPalette:
+			if (SumpData(readByte))
+			{
+				paletteDiv = data[0];
+				// bounds check
+				paletteDiv &= 7;
+
+				// go around again
+				currentState = smPossibleWork;
+			}
+			break;
 		case smSizing:
 			if (SumpData(readByte))
 			{
@@ -700,6 +717,9 @@ void HandleQueue()
 			case CMD_SIZE:
 				NEED_DATA(smSizing, 1);
 				break;
+			case CMD_DIV_PALETTE:
+				NEED_DATA(smDivPalette, 1);
+				break;
 			case CMD_SETALL_PALETTE:
 				NEED_DATA(smSetAllPalette, 1);
 				break;
@@ -795,10 +815,11 @@ void Display()
 #ifndef _USE_PALETTE
 	ws2812_setleds(led, currentCount);
 #else
-	ws2812_sendarray_mask_palette(ledPalette, led, currentCount, _BV(ws2812_pin));
-
-
-	ws2812_setleds(userPalette, currentCount);
+#ifdef _PALETTE_IN_PROGMEM
+	ws2812_sendarray_mask_palette(true, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
+#else
+	ws2812_sendarray_mask_palette(false, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
+#endif
 #endif
 }
 

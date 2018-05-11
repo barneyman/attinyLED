@@ -192,7 +192,7 @@ w_nop16
 #include <avr/pgmspace.h>
 
 // passed as RGBW *only* to make the ASM math simpler (ie *4 == <<2 instead of *3)
-void ws2812_sendarray_mask_palette(const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen, uint8_t maskhi)
+void ws2812_sendarray_mask_palette(bool paletteInProgmem, const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen,unsigned char paletteDivLocal, uint8_t maskhi)
 {
 	uint8_t curbyte, ctr, masklo;
 
@@ -210,19 +210,36 @@ void ws2812_sendarray_mask_palette(const struct cRGBW *paletteArray, uint8_t *da
 	while (datlen--) 
 	{
 
-		const uint8_t *componentDataAddress =
-			(uint8_t*)&paletteArray[*data++];
-			//((uint8_t*)paletteArray) + ((*data++) * sizeof(cRGBW));
+		const uint8_t *componentDataAddress = (uint8_t*)&paletteArray[*data++];
+			
 
 
 		for (uint8_t component = 0; component < 3; component++)
 		{
-
-			//curbyte = pgm_read_byte(componentDataAddress++);
-			curbyte = *componentDataAddress++;
+			if(paletteInProgmem)
+				curbyte = pgm_read_byte(componentDataAddress++);
+			else
+				curbyte = *componentDataAddress++;
 
 
 			asm volatile(
+
+				// there is some strange voodoo magic with which registers actually honour Z flag tests ?
+				// life was much simpler in 6502 :)
+
+				"		mov r0, %5 \n\t"		// move div into r0 (temp register) - marked as clobbered (1 cyc)
+				"		tst r0 \n\t"			// test it (1 cyc)
+				"		breq divDone%= \n\t"	// if it's 0 jump past div (1 cyc for failed, 2 for hit)
+				"divLoop%=: \n\t"
+				"		lsr %1 \n\t"			// div the byte by 2 (1 cyc)
+				"		dec r0 \n\t"			// dec (1 cyc)
+				"		brne divLoop%= \n\t"	// finished? (1 cyc for failed, 2 for hit)
+
+												// div = 0 : 4 cycles
+												// div = x : 3 + ( 4(x-1) + 3)  [ 6 : 30 ] 30cycles is approx 4usec at 8mhz, well below the 10usec reset time
+
+				"divDone%=: \n\t"
+
 				"       ldi   %0,8  \n\t"	// loadImmediate 8 into ctr
 				"loop%=:            \n\t"
 				"       out   %2,%3 \n\t"    //  '1' [01] '0' [01] - re // push HI out to port?
@@ -279,7 +296,8 @@ void ws2812_sendarray_mask_palette(const struct cRGBW *paletteArray, uint8_t *da
 				"       dec   %0    \n\t"    //  '1' [+2] '0' [+2]	// decrement counter
 				"       brne  loop%=\n\t"    //  '1' [+3] '0' [+4]	// branch NEQ to loop
 				:	"=&d" (ctr)
-				: "r" (curbyte), "I" (_SFR_IO_ADDR(ws2812_PORTREG)), "r" (maskhi), "r" (masklo)
+				: "r" (curbyte), "I" (_SFR_IO_ADDR(ws2812_PORTREG)), "r" (maskhi), "r" (masklo), "r" (paletteDivLocal)
+				: "r0"
 				);
 		}
 	}
