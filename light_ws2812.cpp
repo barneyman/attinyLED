@@ -192,7 +192,7 @@ w_nop16
 #include <avr/pgmspace.h>
 
 // passed as RGBW *only* to make the ASM math simpler (ie *4 == <<2 instead of *3)
-void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, bool paletteInProgmem, const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen,unsigned char paletteDivLocal, uint8_t maskhi)
+void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, const struct cRGBW *paletteArray, uint8_t *data, uint16_t datlen,unsigned char paletteDivLocal, uint8_t maskhi)
 {
 	uint8_t curbyte, ctr, masklo;
 
@@ -226,8 +226,8 @@ void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, bool pa
 		else
 		{
 			componentDataAddress = (uint8_t*)&paletteArray[*data++];
-			// honour what was pasted
-			paletteInProgmemConfirmed = paletteInProgmem;
+			// palette in progmem
+			paletteInProgmemConfirmed = true;
 		}
 
 		for (uint8_t component = 0; component < 3; component++)
@@ -237,8 +237,6 @@ void ws2812_sendarray_mask_palette(const struct cRGBW *userPaletteArray, bool pa
 				curbyte = pgm_read_byte(componentDataAddress++);
 
 				asm volatile(
-					// there is some strange voodoo magic with which registers actually honour Z flag tests ?
-					// life was much simpler in 6502 :)
 
 					"		tst %0 \n\t"
 					"		breq divDone%= \n\t"	// if !curbyte skip the div

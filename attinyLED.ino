@@ -1,30 +1,154 @@
 #include <TinyWire.h> // https://github.com/lucullusTheOnly/TinyWire.git
-
 #include "light_ws2812.h"
 #include "ws2812_config.h"
 
 
+
 // define this to use the canned palette = it allows access to more LEDS (because each is referenced by one byte, not 3)
 #define _USE_PALETTE
-#define _PALETTE_IN_PROGMEM
+
+// this enables macro support (you lose some leds)
+#define _USE_MACROS
+
 
 // I2C address used by this chip - feel free to change it 
 #define I2C_ADDR	0x10
-
-
-
 
 //#define _XSISTOR_FOR_ON PB1
 
 // for attiny85
 #define LED_BUILTIN		PB4
-
 #ifndef _XSISTOR_FOR_ON
 #define LED_WHITE		PB1
 #endif
 
+class cirqQueueBase
+{
+protected:
+
+	volatile byte availBytes, availBytesState;
 
 
+public:
+
+	virtual byte read() = 0;
+	unsigned available()
+	{
+		return availBytes;
+	}
+	virtual void reset() = 0;
+};
+
+template <int _CIRCQSIZE, int _CIRQSIZEBITS>
+class circQueueT : public cirqQueueBase
+{
+
+protected:
+
+	byte m_data[_CIRCQSIZE];
+	// let the compiler do the work
+	volatile byte readCursor : _CIRQSIZEBITS, writeCursor : _CIRQSIZEBITS;
+	volatile byte readCursorState : _CIRQSIZEBITS, writeCursorState : _CIRQSIZEBITS;
+
+public:
+
+	circQueueT()
+	{
+		reset();
+	}
+
+	int size()
+	{
+		return _CIRCQSIZE;
+	}
+
+	int space()
+	{
+		return _CIRCQSIZE - available();
+	}
+
+	virtual void reset()
+	{
+		readCursor = writeCursor = availBytes=0;
+		readCursorState = writeCursorState = availBytesState = 0;
+	}
+
+	virtual void pushState()
+	{
+		readCursorState = readCursor;
+		writeCursorState = writeCursor;
+		availBytesState = availBytes;
+	}
+
+	virtual void popState()
+	{
+		readCursor=readCursorState;
+		writeCursor = writeCursorState;
+		availBytes = availBytesState;
+	}
+
+
+
+	virtual byte read()
+	{
+		byte ret = -1;
+
+		{
+			// remember int state
+			uint8_t tmp = SREG;
+			// clear (may be cleared already)
+			cli();
+
+			if (readCursor != writeCursor)
+			{
+				// 
+				availBytes--;
+				ret = m_data[readCursor++];
+			}
+
+			// reinstate interrupts, maybe
+			SREG = tmp;
+		}
+
+		return ret;
+	}
+
+	bool write(byte data)
+	{
+		bool ret = false;
+
+		{
+			// remember int state
+			uint8_t tmp = SREG;
+			// clear (may be cleared already)
+			cli();
+
+			// relying on bits width math
+			if ((readCursor - 1) != writeCursor)
+			{
+				m_data[writeCursor++] = data;
+				availBytes++;
+				ret = true;
+			}
+			// reinstate interrupts, maybe
+			SREG = tmp;
+		}
+
+		return ret;
+	}
+
+};
+
+
+#ifdef _USE_MACROS
+#include <twi.h>
+// the max in the TWI code i think, so lets not exceed that
+#define MAX_MACRO	TWI_RX_BUFFER_SIZE
+
+circQueueT<32,5> macro;
+#endif
+
+circQueueT<8, 3> theQueueTemp;
 
 
 #ifdef _USE_PALETTE
@@ -33,11 +157,7 @@
 
 uint8_t paletteDiv = 0;
 
-#ifdef _PALETTE_IN_PROGMEM
 const struct cRGBW ledPalette[] PROGMEM = {
-#else
-const struct cRGBW ledPalette[] = {
-#endif
 // WARNING - GR Rd Bl !!!!!
 	{ 0, 0, 0 },		// black
 	{ 255, 255, 255 },	// white
@@ -85,7 +205,11 @@ const struct cRGBW ledPalette[] = {
 #define _COLOR_PALLETE_USER8		23
 
 // 5m @ 60pm 
+#ifdef _USE_MACROS
+#define MAXPIX 200
+#else
 #define MAXPIX 300
+#endif
 #define MAX_USER_PALETTE	8
 byte led[MAXPIX];
 struct cRGBW userPalette[MAX_USER_PALETTE];
@@ -94,7 +218,11 @@ struct cRGBW userPalette[MAX_USER_PALETTE];
 
 // 120 = 2m @60pm or 4 metres @30pm
 // 60 = 1m @60pm or 2 metres @30pm
+#ifdef _USE_MACROS
+#define MAXPIX 80
+#else
 #define MAXPIX 90
+#endif
 struct cRGB led[MAXPIX];
 
 #endif
@@ -106,6 +234,7 @@ struct cRGB led[MAXPIX];
 #define _FLAG_ROOM_IN_QUEUE	128
 #define _FLAG_QUEUE_FLUSHED	64
 #define _FLAG_PALETTE_MODE	32
+#define _FLAG_MACROS		16
 
 // sendData commands
 #define CMD_RESET	0	// turn it all off
@@ -117,14 +246,16 @@ struct cRGB led[MAXPIX];
 #define CMD_DISPLAY	6	// shunt out to the LEDS - beware, interrupts get cleared, so I2C will fail
 #define CMD_INVERT	7	// invert all rgbs
 // only works when _XSISTOR_FOR_ON define
-#define CMD_ON		8	// + on/off byte
-#define CMD_OFF		9	// + on/off byte
+#define CMD_ON_OFF		8	// + on/off byte
 // palette commands
 #define CMD_SETALL_PALETTE		10	// set all leds to RGB
 #define CMD_SETONE_PALETTE		11	// set a single led - offset(0) RGB
 #define CMD_SHIFT_PALETTE		12	// shift current set - signed byte (for L and R) RGB replace
 #define CMD_DIV_PALETTE			13	// apply div to palette colours - one byte = rgb >> div
 #define CMD_USER_PALETTE_SET	14	// set one of the user colours - 4 bytes - offset r g b 
+// macros
+#define CMD_SET_MACRO			15	// len + len bytes
+#define CMD_RUN_MACRO			16	// do it
 
 // how many leds we actually have
 unsigned currentCount = MAXPIX;
@@ -148,7 +279,6 @@ void setup()
 	delay(200);
 
 	// power
-
 	ADCSRA &= ~(1 << ADEN); //Disable ADC, saves ~230uA
 
 
@@ -205,6 +335,7 @@ void setup()
 	memset(&userPalette, 0, sizeof(userPalette));
 #endif
 
+
 	// state stays the same
 	Display();
 
@@ -219,9 +350,10 @@ void setup()
 }
 
 
-enum stateMachine {		smIdle=0, smPossibleWork=20, smSizing=30, 
-						smSetAll=40, smSetOne, smShifting, smRolling, smInverting,
-						smSetAllPalette=50, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette, smUserPalette
+enum stateMachine {		smIdle=0, smPossibleWork, smSizing, smOnOff,
+						smSetAll=10, smSetOne, smShifting, smRolling, smInverting, 
+						smSetAllPalette=20, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette, smUserPalette,
+						smMacroGetLen=30, smMacroGet
 				} ;
 
 volatile stateMachine currentState = stateMachine::smIdle;
@@ -236,6 +368,15 @@ byte data[MAX_Q_COMMAND_AND_DATA];
 
 #define NEED_DATA(y,x)	{ dataCount=0; dataOutstanding=x; currentState=y; }
 
+#ifdef _USE_MACROS
+bool SumpMacro(byte theByte)
+{
+	// 
+	macro.write(theByte);
+	dataCount++;
+	return (dataCount == dataOutstanding);
+}
+#endif
 
 
 bool SumpData(byte theByte)
@@ -244,88 +385,9 @@ bool SumpData(byte theByte)
 	return (dataCount == dataOutstanding);
 }
 
-class circQueue
-{
 
-#define _CIRCQSIZE		8
-#define _CIRQSIZEBITS	3
-protected:
-
-	byte m_data[_CIRCQSIZE];
-	// let the compiler do the work
-	volatile byte readCursor : _CIRQSIZEBITS, writeCursor : _CIRQSIZEBITS;
-	volatile byte availBytes;
-
-public:
-
-	circQueue() :readCursor(0), writeCursor(0), availBytes(0)
-	{
-	}
-
-	int space()
-	{
-		return _CIRCQSIZE - available();
-	}
-
-	unsigned available()
-	{
-		return availBytes;
-	}
-
-	byte read()
-	{
-		byte ret = -1;
-
-		{
-			// remember int state
-			uint8_t tmp = SREG;
-			// clear (may be cleared already)
-			cli();
-
-			if (readCursor != writeCursor)
-			{
-				// 
-				availBytes--;
-				ret = m_data[readCursor++];
-			}
-
-			// reinstate interrupts, maybe
-			SREG = tmp;
-		}
-
-		return ret;
-	}
-
-	bool write(byte data)
-	{
-		bool ret = false;
-
-		{
-			// remember int state
-			uint8_t tmp = SREG;
-			// clear (may be cleared already)
-			cli();
-
-			// relying on bits width math
-			if ((readCursor - 1) != writeCursor)
-			{
-				m_data[writeCursor++] = data;
-				availBytes++;
-				ret = true;
-			}
-			// reinstate interrupts, maybe
-			SREG = tmp;
-		}
-
-		return ret;
-	}
-
-};
-
-circQueue theQueue;
 
 //#define _TRY_SLEEP
-
 #ifdef _TRY_SLEEP
 #include <avr/sleep.h>
 #endif
@@ -386,9 +448,6 @@ uint16_t StackRoomCount(void)
 #endif
 
 
-//#define _SELF_POPULATE
-
-#define _HANDLE_IN_ISR
 
 // disable wdt
 void get_mcusr(void) \
@@ -419,35 +478,18 @@ void  loop()
 #endif
 	}
 
-#ifndef _DISABLE_TIMER
-	int status = TinyWire.status();
-	if (status != 0)
+	// flag set in the recv ISR
+	if (displayNow)
 	{
-		for (int flash = 0; flash < status; flash++)
-		{
-			digitalWrite(LED_WHITE, HIGH);
-			delay(200);
-			digitalWrite(LED_WHITE, LOW);
-			delay(200);
-		}
-
-		delay(1000);
+		Display();
+		displayNow = false;
 	}
-	else
-#endif
-	{
 
-		if (displayNow)
-		{
-			Display();
-			displayNow = false;
-		}
-	}
 }
 
 
 // called from the OnReceive ISR
-void HandleQueue()
+void HandleQueue(bool domacro)
 {
 #ifdef _CHECK_STACK
 	if (!CheckStackMinimum(8))
@@ -457,12 +499,42 @@ void HandleQueue()
 #endif
 
 	// loops, until all received bytes are read
-	while (theQueue.available())
+	while (domacro?macro.available():theQueueTemp.available())
 	{
-		byte readByte = theQueue.read();
+		byte readByte = (domacro ? macro.read():theQueueTemp.read());
 
 		switch (currentState)
 		{
+		case smMacroGet:
+			// sumps to a DIFFERENT buffer
+			if (SumpMacro(readByte))
+			{
+				// go around again
+				currentState = smPossibleWork;
+				// and push the state of the queue - every time werun we pop it back
+				macro.pushState();
+			}
+			break;
+		case smMacroGetLen:
+			if (SumpData(readByte))
+			{
+				// go around again
+				NEED_DATA(smMacroGet,data[0]);
+				// remember
+				macro.write(data[0]);
+			}
+			break;
+		case smOnOff:
+			if (SumpData(readByte))
+			{
+#ifdef _XSISTOR_FOR_ON
+				digitalWrite(_XSISTOR_FOR_ON, data[0]?HIGH:LOW);
+#endif
+				// go around again
+				currentState = smPossibleWork;
+			}
+			break;
+
 		case smDivPalette:
 			if (SumpData(readByte))
 			{
@@ -713,17 +785,19 @@ void HandleQueue()
 		case smPossibleWork:
 			switch (readByte)
 			{
-			case CMD_ON:
-#ifdef _XSISTOR_FOR_ON
-				digitalWrite(_XSISTOR_FOR_ON, HIGH);
-#endif
-				currentState = smPossibleWork;
+			case CMD_RUN_MACRO:
+				// pop the queu back to its useful state
+				macro.popState();
 				break;
-			case CMD_OFF:
-#ifdef _XSISTOR_FOR_ON
-				digitalWrite(_XSISTOR_FOR_ON, LOW);
-#endif
-				currentState = smPossibleWork;
+			case CMD_SET_MACRO:
+				// we need the length first
+				NEED_DATA(smMacroGetLen, 1);
+				// and reset the macro queue
+				macro.reset();
+				break;
+
+			case CMD_ON_OFF:
+				NEED_DATA(smOnOff, 1);
 				break;
 			case CMD_RESET:
 				memset(&led, 0, sizeof(led));
@@ -799,18 +873,16 @@ void onI2CReceive(int howMany)
 	// we are NOT assured of getting all the bytes in a endTransmission in one chunk
 	// so, don't assume we will
 
-	{
-		while (TinyWire.available())
-		{
-			theQueue.write(TinyWire.read());
-		}
+	if (currentState == smIdle)
+		currentState = smPossibleWork;
 
-		if(currentState==smIdle)
-			currentState = smPossibleWork;
+	while (TinyWire.available())
+	{
+		theQueueTemp.write(TinyWire.read());
 	}
 
 	// take as long as you need - no wdt, and nothing else running on the chip
-	HandleQueue();
+	HandleQueue(false);
 
 }
 
@@ -821,11 +893,11 @@ void onI2CRequest(void)
 	// meh 
 	byte result = currentState;
 	// if we have more space left then biggest command + data ..
-	if (theQueue.space() == _CIRCQSIZE)
+	if (theQueueTemp.space() == theQueueTemp.size())
 	{
 		result |= _FLAG_QUEUE_FLUSHED;
 	}
-	else if (theQueue.space() >= (MAX_Q_COMMAND_AND_DATA))
+	else if (theQueueTemp.space() >= (MAX_Q_COMMAND_AND_DATA))
 	{
 		result |= _FLAG_ROOM_IN_QUEUE;
 	}
@@ -834,19 +906,20 @@ void onI2CRequest(void)
 	result |= _FLAG_PALETTE_MODE;
 #endif
 
+#ifdef _USE_MACROS
+	result |= _FLAG_MACROS;
+#endif
+
 	TinyWire.send(result);
 }
+
 
 void Display()
 {
 #ifndef _USE_PALETTE
 	ws2812_setleds(led, currentCount);
 #else
-#ifdef _PALETTE_IN_PROGMEM
-	ws2812_sendarray_mask_palette(userPalette,true, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
-#else
-	ws2812_sendarray_mask_palette(userPalette,false, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
-#endif
+	ws2812_sendarray_mask_palette(userPalette, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
 #endif
 }
 
