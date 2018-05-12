@@ -9,7 +9,7 @@
 
 // this enables macro support (you lose some leds)
 #define _USE_MACROS
-
+#define _RUN_MACRO_ON_BUTTON	PB1
 
 // I2C address used by this chip - feel free to change it 
 #define I2C_ADDR	0x10
@@ -22,25 +22,9 @@
 #define LED_WHITE		PB1
 #endif
 
-class cirqQueueBase
-{
-protected:
-
-	volatile byte availBytes, availBytesState;
-
-
-public:
-
-	virtual byte read() = 0;
-	unsigned available()
-	{
-		return availBytes;
-	}
-	virtual void reset() = 0;
-};
 
 template <int _CIRCQSIZE, int _CIRQSIZEBITS>
-class circQueueT : public cirqQueueBase
+class circQueueT 
 {
 
 protected:
@@ -49,12 +33,18 @@ protected:
 	// let the compiler do the work
 	volatile byte readCursor : _CIRQSIZEBITS, writeCursor : _CIRQSIZEBITS;
 	volatile byte readCursorState : _CIRQSIZEBITS, writeCursorState : _CIRQSIZEBITS;
+	volatile byte availBytes, availBytesState;
 
 public:
 
 	circQueueT()
 	{
 		reset();
+	}
+
+	unsigned available()
+	{
+		return availBytes;
 	}
 
 	int size()
@@ -67,20 +57,20 @@ public:
 		return _CIRCQSIZE - available();
 	}
 
-	virtual void reset()
+	void reset()
 	{
 		readCursor = writeCursor = availBytes=0;
 		readCursorState = writeCursorState = availBytesState = 0;
 	}
 
-	virtual void pushState()
+	void pushState()
 	{
 		readCursorState = readCursor;
 		writeCursorState = writeCursor;
 		availBytesState = availBytes;
 	}
 
-	virtual void popState()
+	void popState()
 	{
 		readCursor=readCursorState;
 		writeCursor = writeCursorState;
@@ -89,7 +79,7 @@ public:
 
 
 
-	virtual byte read()
+	byte read()
 	{
 		byte ret = -1;
 
@@ -148,7 +138,7 @@ public:
 circQueueT<32,5> macro;
 #endif
 
-circQueueT<8, 3> theQueueTemp;
+//circQueueT<8, 3> theQueueTemp;
 
 
 #ifdef _USE_PALETTE
@@ -206,7 +196,7 @@ const struct cRGBW ledPalette[] PROGMEM = {
 
 // 5m @ 60pm 
 #ifdef _USE_MACROS
-#define MAXPIX 200
+#define MAXPIX 280
 #else
 #define MAXPIX 300
 #endif
@@ -268,7 +258,6 @@ unsigned currentCount = MAXPIX;
 
 
 
-
 // this turns off the delay() timer
 #define _DISABLE_TIMER
 
@@ -290,7 +279,12 @@ void setup()
 #ifdef _XSISTOR_FOR_ON
 	pinMode(_XSISTOR_FOR_ON, OUTPUT);
 #else
+#ifdef _RUN_MACRO_ON_BUTTON
+	pinMode(_RUN_MACRO_ON_BUTTON, INPUT_PULLUP);
+	attachInterrupt(_RUN_MACRO_ON_BUTTON, RunOnButton, LOW);
+#else
 	pinMode(LED_WHITE, OUTPUT);
+#endif
 #endif
 
 	digitalWrite(LED_BUILTIN, LOW);
@@ -376,6 +370,14 @@ bool SumpMacro(byte theByte)
 	dataCount++;
 	return (dataCount == dataOutstanding);
 }
+
+bool SumpBucket(byte theByte)
+{
+	// dev/nul
+	dataCount++;
+	return (dataCount == dataOutstanding);
+}
+
 #endif
 
 
@@ -464,6 +466,8 @@ void get_mcusr(void)
 volatile bool displayNow = false;
 #endif
 
+volatile bool runMacro=false;
+
 void  loop()
 {
 
@@ -476,6 +480,17 @@ void  loop()
 		sleep_mode();                        // System actually sleeps here
 		sleep_disable();                     // System continues execution here when watchdog timed out 
 #endif
+	}
+
+	if (runMacro)
+	{
+		currentState = smPossibleWork;
+
+		HandleQueue(runMacro);
+		runMacro = false;
+		// and display
+		Display();
+		digitalWrite(LED_BUILTIN, LOW);
 	}
 
 	// flag set in the recv ISR
@@ -499,20 +514,32 @@ void HandleQueue(bool domacro)
 #endif
 
 	// loops, until all received bytes are read
-	while (domacro?macro.available():theQueueTemp.available())
+	while (domacro?macro.available():TinyWire.available())
 	{
-		byte readByte = (domacro ? macro.read():theQueueTemp.read());
+		byte readByte = (domacro ? macro.read(): TinyWire.read());
 
 		switch (currentState)
 		{
 		case smMacroGet:
+			// we cannot do this IN a macro
+			if (domacro)
+			{
+				if (SumpBucket(readByte))
+				{
+					// go around again
+					currentState = smPossibleWork;
+				}
+			}
 			// sumps to a DIFFERENT buffer
-			if (SumpMacro(readByte))
+			else if (SumpMacro(readByte))
 			{
 				// go around again
 				currentState = smPossibleWork;
-				// and push the state of the queue - every time werun we pop it back
+				// and push the state of the queue - every time we run we pop it back
 				macro.pushState();
+
+				if (macro.available() == 9)
+					digitalWrite(LED_BUILTIN, HIGH);
 			}
 			break;
 		case smMacroGetLen:
@@ -520,8 +547,6 @@ void HandleQueue(bool domacro)
 			{
 				// go around again
 				NEED_DATA(smMacroGet,data[0]);
-				// remember
-				macro.write(data[0]);
 			}
 			break;
 		case smOnOff:
@@ -786,9 +811,17 @@ void HandleQueue(bool domacro)
 			switch (readByte)
 			{
 			case CMD_RUN_MACRO:
-				// pop the queu back to its useful state
-				macro.popState();
+				// we CANNOT do this while we're in macro!
+				if (!domacro)
+				{
+					// pop the queue back to its useful state
+					macro.popState();
+					// flag to run in loop()
+					runMacro = true;
+				}
+				currentState = smPossibleWork;
 				break;
+
 			case CMD_SET_MACRO:
 				// we need the length first
 				NEED_DATA(smMacroGetLen, 1);
@@ -876,10 +909,10 @@ void onI2CReceive(int howMany)
 	if (currentState == smIdle)
 		currentState = smPossibleWork;
 
-	while (TinyWire.available())
-	{
-		theQueueTemp.write(TinyWire.read());
-	}
+	//while (TinyWire.available())
+	//{
+	//	theQueueTemp.write(TinyWire.read());
+	//}
 
 	// take as long as you need - no wdt, and nothing else running on the chip
 	HandleQueue(false);
@@ -893,11 +926,11 @@ void onI2CRequest(void)
 	// meh 
 	byte result = currentState;
 	// if we have more space left then biggest command + data ..
-	if (theQueueTemp.space() == theQueueTemp.size())
+	//if (TinyWire.available() == theQueueTemp.size())
 	{
 		result |= _FLAG_QUEUE_FLUSHED;
 	}
-	else if (theQueueTemp.space() >= (MAX_Q_COMMAND_AND_DATA))
+	//else if (theQueueTemp.space() >= (MAX_Q_COMMAND_AND_DATA))
 	{
 		result |= _FLAG_ROOM_IN_QUEUE;
 	}
@@ -912,6 +945,14 @@ void onI2CRequest(void)
 
 	TinyWire.send(result);
 }
+
+#ifdef _RUN_MACRO_ON_BUTTON
+void RunOnButton()
+{
+	macro.popState();
+	runMacro = true;
+}
+#endif
 
 
 void Display()
