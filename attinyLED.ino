@@ -9,7 +9,7 @@
 
 // this enables macro support (you lose some leds)
 #define _USE_MACROS
-#define _RUN_MACRO_ON_BUTTON	PB1
+#define _RUN_MACRO_ON_BUTTON	PCINT1
 
 // I2C address used by this chip - feel free to change it 
 #define I2C_ADDR	0x10
@@ -280,8 +280,11 @@ void setup()
 	pinMode(_XSISTOR_FOR_ON, OUTPUT);
 #else
 #ifdef _RUN_MACRO_ON_BUTTON
-	pinMode(_RUN_MACRO_ON_BUTTON, INPUT_PULLUP);
-	attachInterrupt(_RUN_MACRO_ON_BUTTON, RunOnButton, LOW);
+
+	GIMSK |= 1<< PCIE;    // turns on pin change interrupts
+	PCMSK |= _RUN_MACRO_ON_BUTTON;    // turn on interrupts on pin
+	//Twi_chainISR(ButtonPressed);
+
 #else
 	pinMode(LED_WHITE, OUTPUT);
 #endif
@@ -947,7 +950,7 @@ void onI2CRequest(void)
 }
 
 #ifdef _RUN_MACRO_ON_BUTTON
-void RunOnButton()
+void ButtonPressed()
 {
 	macro.popState();
 	runMacro = true;
