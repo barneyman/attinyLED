@@ -9,7 +9,10 @@
 
 // this enables macro support (you lose some leds)
 #define _USE_MACROS
+
+#ifdef _USE_MACROS
 #define _RUN_MACRO_ON_BUTTON	PCINT1
+#endif
 
 // I2C address used by this chip - feel free to change it 
 #define I2C_ADDR	0x10
@@ -196,7 +199,7 @@ const struct cRGBW ledPalette[] PROGMEM = {
 
 // 5m @ 60pm 
 #ifdef _USE_MACROS
-#define MAXPIX 200
+#define MAXPIX 256
 #else
 #define MAXPIX 300
 #endif
@@ -211,7 +214,7 @@ struct cRGBW userPalette[MAX_USER_PALETTE];
 #ifdef _USE_MACROS
 #define MAXPIX 80
 #else
-#define MAXPIX 90
+#define MAXPIX 100
 #endif
 struct cRGB led[MAXPIX];
 
@@ -247,6 +250,8 @@ struct cRGB led[MAXPIX];
 #define CMD_SET_MACRO			15	// len + len bytes
 #define CMD_RUN_MACRO			16	// do it
 #define CMD_DELAY_MACRO			17	// only honoured in macros, one byte - tenths of seconds
+//other 
+#define CMD_CHANGE_RESPONSE		18	// what we deliver on a requestData
 
 // how many leds we actually have
 unsigned currentCount = MAXPIX;
@@ -363,11 +368,15 @@ void setup()
 enum stateMachine {		smIdle=0, smPossibleWork, smSizing, smOnOff,
 						smSetAll=10, smSetOne, smShifting, smRolling, smInverting, 
 						smSetAllPalette=20, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette, smUserPalette,
-						smMacroGetLen=30, smMacroGet, smGetDelayMacro
+						smMacroGetLen=30, smMacroGet, smGetDelayMacro,
+
+						smRequestResponse
 				} ;
 
-volatile stateMachine currentState = stateMachine::smIdle;
+enum responseStateMachine { rsmFlags=0, rsmStack, rsmEoMarker };
 
+volatile stateMachine currentState = stateMachine::smIdle;
+volatile responseStateMachine currentRequest = rsmFlags;
 
 // size of the biggest command data (less the command byte)
 #define MAX_Q_DATA					4
@@ -378,23 +387,22 @@ byte data[MAX_Q_COMMAND_AND_DATA];
 
 #define NEED_DATA(y,x)	{ dataCount=0; dataOutstanding=x; currentState=y; }
 
-#ifdef _USE_MACROS
 bool SumpMacro(byte theByte)
 {
 	// 
+#ifdef _USE_MACROS
 	macro.write(theByte);
+#endif
 	dataCount++;
 	return (dataCount == dataOutstanding);
 }
 
-bool SumpBucket(byte theByte)
+bool SumpToNull(byte theByte)
 {
 	// dev/nul
 	dataCount++;
 	return (dataCount == dataOutstanding);
 }
-
-#endif
 
 
 bool SumpData(byte theByte)
@@ -410,7 +418,7 @@ bool SumpData(byte theByte)
 #include <avr/sleep.h>
 #endif
 
-//#define _CHECK_STACK 128
+#define _CHECK_STACK 128
 
 #ifdef _CHECK_STACK
 
@@ -421,10 +429,12 @@ extern uint8_t __stack;
 #define STACK_CANARY	0xc5
 
 // https://www.nongnu.org/avr-libc/user-manual/mem_sections.html
-void StackPaint(void) __attribute__((naked)) __attribute__((section(".init1")));
-
+// USED!!!! is the important attribute here, or the linker hoses it
+void StackPaint(void) __attribute__((naked, used, section(".init3")));
 void StackPaint(void)
 {
+	// loops from _end (end of BSS section) to current SP, painting stack canary
+
 	__asm volatile (
 		"    ldi r30,lo8(_end)\n"
 		"    ldi r31,hi8(_end)\n"
@@ -440,26 +450,34 @@ void StackPaint(void)
 		"    breq .loop"::);
 }
 
-
-
-bool CheckStackMinimum(uint16_t minRequired)
-{
-	return (StackRoomCount() < minRequired)?false:true;
-}
+#define BIZARRE
 
 // walk from end of bss to where the stack has been, max
 uint16_t StackRoomCount(void)
 {
-	//const uint8_t *p = &_end;
-	const uint8_t *p = (&__stack)-_CHECK_STACK;
+	const uint8_t *p = &_end;
+	const uint8_t *s = &__stack;
 	uint16_t       c = 0;
 
-	while ((*p == STACK_CANARY) && (p <= &__stack))
-	{
-		p++;
-		c++;
-	}
+#define _STACK_FIREBREAK_MIN	5
 
+	// start at end of bss walk towards stack
+	for (const uint8_t *walker = p; walker < (s - _STACK_FIREBREAK_MIN);walker++)
+	{
+		if (*walker == STACK_CANARY)
+		{
+			c++;
+		}
+		else
+		{
+			if (c >= _STACK_FIREBREAK_MIN)
+				break;
+			c = 0;
+
+		}
+
+
+	}
 	return c;
 }
 
@@ -467,22 +485,24 @@ uint16_t StackRoomCount(void)
 
 
 
-// disable wdt
-void get_mcusr(void) \
-__attribute__((naked)) \
-__attribute__((section(".init3")));
-void get_mcusr(void)
-{
-	MCUSR = 0;
-	wdt_disable();
-}
+//// disable wdt
+//void get_mcusr(void) \
+//__attribute__((naked)) \
+//__attribute__((section(".init3")));
+//void get_mcusr(void)
+//{
+//	MCUSR = 0;
+//	wdt_disable();
+//}
 
 #define _DISPLAY_IN_LOOP
 #ifdef _DISPLAY_IN_LOOP
 volatile bool displayNow = false;
 #endif
 
+#ifdef _USE_MACROS
 volatile bool runMacro=false;
+#endif
 
 void  loop()
 {
@@ -498,6 +518,7 @@ void  loop()
 #endif
 	}
 
+#ifdef _USE_MACROS
 	if (runMacro)
 	{
 		currentState = smPossibleWork;
@@ -506,8 +527,8 @@ void  loop()
 		// and display
 		Display();
 		runMacro = false;
-		digitalWrite(LED_BUILTIN, LOW);
 	}
+#endif
 
 	// flag set in the recv ISR
 	if (displayNow)
@@ -522,17 +543,20 @@ void  loop()
 // called from the OnReceive ISR
 void HandleQueue(bool domacro)
 {
-#ifdef _CHECK_STACK
-	if (!CheckStackMinimum(8))
-	{
-		digitalWrite(LED_WHITE, HIGH);
-	}
-#endif
 
 	// loops, until all received bytes are read
+#ifdef _USE_MACROS
 	while (domacro?macro.available():TinyWire.available())
+#else
+	while (TinyWire.available())
+#endif
 	{
-		byte readByte = (domacro ? macro.read(): TinyWire.read());
+		byte readByte =
+#ifdef _USE_MACROS
+		(domacro ? macro.read() : TinyWire.read());
+#else
+		TinyWire.read();
+#endif
 
 		switch (currentState)
 		{
@@ -540,7 +564,7 @@ void HandleQueue(bool domacro)
 			// we cannot do this IN a macro
 			if (domacro)
 			{
-				if (SumpBucket(readByte))
+				if (SumpToNull(readByte))
 				{
 					// go around again
 					currentState = smPossibleWork;
@@ -551,8 +575,10 @@ void HandleQueue(bool domacro)
 			{
 				// go around again
 				currentState = smPossibleWork;
+#ifdef _USE_MACROS
 				// and push the state of the queue - every time we run we pop it back
 				macro.pushState();
+#endif
 			}
 			break;
 		case smMacroGetLen:
@@ -574,6 +600,16 @@ void HandleQueue(bool domacro)
 			}
 			break;
 
+		case smRequestResponse:
+			if (SumpData(readByte))
+			{
+				// bounds check
+				if((responseStateMachine)data[0]<rsmEoMarker)
+					currentRequest = (responseStateMachine)data[0];
+				currentState = smPossibleWork;
+			}
+			break;
+
 		case smOnOff:
 			if (SumpData(readByte))
 			{
@@ -588,10 +624,11 @@ void HandleQueue(bool domacro)
 		case smDivPalette:
 			if (SumpData(readByte))
 			{
+#ifdef _USE_PALETTE
 				paletteDiv = data[0];
 				// bounds check
 				paletteDiv &= 7;
-
+#endif
 				// go around again
 				currentState = smPossibleWork;
 			}
@@ -600,6 +637,7 @@ void HandleQueue(bool domacro)
 		case smUserPalette:
 			if (SumpData(readByte))
 			{
+#ifdef _USE_PALETTE
 				int offset = data[0];
 				offset -= _COLOR_PALLETE_USER1;
 
@@ -610,7 +648,7 @@ void HandleQueue(bool domacro)
 					userPalette[offset].g = data[2];
 					userPalette[offset].b = data[3];
 				}
-
+#endif
 				// go around again
 				currentState = smPossibleWork;
 			}
@@ -837,11 +875,13 @@ void HandleQueue(bool domacro)
 			{
 			case CMD_RUN_MACRO:
 				// we CANNOT do this while we're in macro!
+#ifdef _USE_MACROS
 				if (!domacro)
 				{
 					// flag to run in loop()
 					runMacro = true;
 				}
+#endif
 				currentState = smPossibleWork;
 				break;
 			case CMD_DELAY_MACRO:
@@ -851,8 +891,10 @@ void HandleQueue(bool domacro)
 			case CMD_SET_MACRO:
 				// we need the length first
 				NEED_DATA(smMacroGetLen, 1);
+#ifdef _USE_MACROS
 				// and reset the macro queue
 				macro.reset();
+#endif
 				break;
 
 			case CMD_ON_OFF:
@@ -877,6 +919,9 @@ void HandleQueue(bool domacro)
 				Display();
 #endif
 				currentState = smPossibleWork;
+				break;
+			case CMD_CHANGE_RESPONSE:
+				NEED_DATA(smRequestResponse, 1);
 				break;
 			case CMD_SIZE:
 				NEED_DATA(smSizing, 1);
@@ -923,8 +968,10 @@ void HandleQueue(bool domacro)
 		}
 
 		// and breathe
+#ifdef _USE_MACROS
 		if(runMacro)
 			yield();
+#endif
 	}
 
 	// if we leave the available loop guessing there's more, assume none
@@ -959,27 +1006,39 @@ void onI2CReceive(int howMany)
 
 void onI2CRequest(void)
 {
-
-	// meh 
 	byte result = currentState;
-	// if we have more space left then biggest command + data ..
-	//if (TinyWire.available() == theQueueTemp.size())
+
+	switch (currentRequest)
 	{
-		result |= _FLAG_QUEUE_FLUSHED;
-	}
-	//else if (theQueueTemp.space() >= (MAX_Q_COMMAND_AND_DATA))
-	{
-		result |= _FLAG_ROOM_IN_QUEUE;
-	}
+	case rsmFlags:
+		// meh 
+		result = currentState;
+		// if we have more space left then biggest command + data ..
+		//if (TinyWire.available() == theQueueTemp.size())
+		{
+			result |= _FLAG_QUEUE_FLUSHED;
+		}
+		//else if (theQueueTemp.space() >= (MAX_Q_COMMAND_AND_DATA))
+		{
+			result |= _FLAG_ROOM_IN_QUEUE;
+		}
 
 #ifdef _USE_PALETTE
-	result |= _FLAG_PALETTE_MODE;
+		result |= _FLAG_PALETTE_MODE;
 #endif
 
 #ifdef _USE_MACROS
-	result |= _FLAG_MACROS;
+		result |= _FLAG_MACROS;
 #endif
-
+		break;
+	case rsmStack:
+#ifdef _CHECK_STACK
+		result = StackRoomCount() & 255;
+#else
+		result = 0;
+#endif
+		break;
+	}
 	TinyWire.send(result);
 }
 
@@ -998,10 +1057,7 @@ void ButtonPressed(uint8_t pinsChanged)
 				runMacro = true;
 			}
 		}
-		else
-		{
-			digitalWrite(LED_BUILTIN, HIGH);
-		}
+		//digitalWrite(LED_BUILTIN, HIGH);
 	}
 }
 #endif
