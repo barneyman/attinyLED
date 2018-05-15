@@ -18,7 +18,7 @@
 
 // for attiny85
 #define LED_BUILTIN		PB4
-#ifndef _XSISTOR_FOR_ON
+#if !defined(_XSISTOR_FOR_ON) && !defined(_RUN_MACRO_ON_BUTTON)
 #define LED_WHITE		PB1
 #endif
 
@@ -277,36 +277,35 @@ void setup()
 	// initialize digital pin LED_BUILTIN as an output.
 	pinMode(LED_BUILTIN, OUTPUT);
 #ifdef _XSISTOR_FOR_ON
+#if !defined(_RUN_MACRO_ON_BUTTON)
 	pinMode(_XSISTOR_FOR_ON, OUTPUT);
-#else
-#ifdef _RUN_MACRO_ON_BUTTON
-
-	GIMSK |= 1<< PCIE;    // turns on pin change interrupts
-	PCMSK |= _RUN_MACRO_ON_BUTTON;    // turn on interrupts on pin
-	//Twi_chainISR(ButtonPressed);
-
-#else
-	pinMode(LED_WHITE, OUTPUT);
 #endif
+#else
 #endif
 
 	digitalWrite(LED_BUILTIN, LOW);
 #ifdef _XSISTOR_FOR_ON
 	digitalWrite(_XSISTOR_FOR_ON, LOW);
 #else
+#if !defined(_RUN_MACRO_ON_BUTTON)
 	digitalWrite(LED_WHITE, LOW);
+#endif
 #endif
 
 	for(int flash=0;flash<3;flash++)
 	{
 		digitalWrite(LED_BUILTIN, HIGH);
 #ifndef _XSISTOR_FOR_ON
+#if !defined(_RUN_MACRO_ON_BUTTON)
 		digitalWrite(LED_WHITE, HIGH);
+#endif
 #endif
 		delay(100);
 		digitalWrite(LED_BUILTIN, LOW);
 #ifndef _XSISTOR_FOR_ON
+#if !defined(_RUN_MACRO_ON_BUTTON)
 		digitalWrite(LED_WHITE, LOW);
+#endif
 #endif
 		delay(200);
 	}
@@ -336,8 +335,21 @@ void setup()
 	// state stays the same
 	Display();
 
+#ifdef _RUN_MACRO_ON_BUTTON
+	// config TinyWire library for I2C slave functionality
+	TinyWire.begin(I2C_ADDR, _RUN_MACRO_ON_BUTTON);
+
+	// set direction 0 is input
+	DDRB &= ~(1 << _RUN_MACRO_ON_BUTTON);
+	// and now it's input, set it as a PULLUP (by writing to it)
+	PORTB |= (1 << _RUN_MACRO_ON_BUTTON);
+	TinyWire.onISR(ButtonPressed);
+
+#else
 	// config TinyWire library for I2C slave functionality
 	TinyWire.begin(I2C_ADDR);
+	pinMode(LED_WHITE, OUTPUT);
+#endif
 
 	// sets callback for the event of a slave receive
 	TinyWire.onReceive(onI2CReceive);
@@ -541,8 +553,7 @@ void HandleQueue(bool domacro)
 				// and push the state of the queue - every time we run we pop it back
 				macro.pushState();
 
-				if (macro.available() == 9)
-					digitalWrite(LED_BUILTIN, HIGH);
+				digitalWrite(LED_BUILTIN, HIGH);
 			}
 			break;
 		case smMacroGetLen:
@@ -950,10 +961,16 @@ void onI2CRequest(void)
 }
 
 #ifdef _RUN_MACRO_ON_BUTTON
-void ButtonPressed()
+void ButtonPressed(uint8_t )
 {
-	macro.popState();
-	runMacro = true;
+	// if it's low, grounded
+	if (!(PINB & (1<<_RUN_MACRO_ON_BUTTON)))
+	{
+		digitalWrite(LED_BUILTIN,LOW);
+
+		macro.popState();
+		runMacro = true;
+	}
 }
 #endif
 
