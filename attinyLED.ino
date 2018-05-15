@@ -196,7 +196,7 @@ const struct cRGBW ledPalette[] PROGMEM = {
 
 // 5m @ 60pm 
 #ifdef _USE_MACROS
-#define MAXPIX 280
+#define MAXPIX 200
 #else
 #define MAXPIX 300
 #endif
@@ -246,6 +246,7 @@ struct cRGB led[MAXPIX];
 // macros
 #define CMD_SET_MACRO			15	// len + len bytes
 #define CMD_RUN_MACRO			16	// do it
+#define CMD_DELAY_MACRO			17	// only honoured in macros, one byte - tenths of seconds
 
 // how many leds we actually have
 unsigned currentCount = MAXPIX;
@@ -259,7 +260,7 @@ unsigned currentCount = MAXPIX;
 
 
 // this turns off the delay() timer
-#define _DISABLE_TIMER
+// #define _DISABLE_TIMER
 
 // the setup function runs once when you press reset or power the board
 void setup() 
@@ -332,7 +333,7 @@ void setup()
 #endif
 
 
-	// state stays the same
+	// reset effectively
 	Display();
 
 #ifdef _RUN_MACRO_ON_BUTTON
@@ -362,7 +363,7 @@ void setup()
 enum stateMachine {		smIdle=0, smPossibleWork, smSizing, smOnOff,
 						smSetAll=10, smSetOne, smShifting, smRolling, smInverting, 
 						smSetAllPalette=20, smSetOnePalette, smShiftingPalette, smRollingPalette, smInvertingPalette, smDivPalette, smUserPalette,
-						smMacroGetLen=30, smMacroGet
+						smMacroGetLen=30, smMacroGet, smGetDelayMacro
 				} ;
 
 volatile stateMachine currentState = stateMachine::smIdle;
@@ -500,11 +501,11 @@ void  loop()
 	if (runMacro)
 	{
 		currentState = smPossibleWork;
-
+		macro.popState();
 		HandleQueue(runMacro);
-		runMacro = false;
 		// and display
 		Display();
+		runMacro = false;
 		digitalWrite(LED_BUILTIN, LOW);
 	}
 
@@ -552,8 +553,6 @@ void HandleQueue(bool domacro)
 				currentState = smPossibleWork;
 				// and push the state of the queue - every time we run we pop it back
 				macro.pushState();
-
-				digitalWrite(LED_BUILTIN, HIGH);
 			}
 			break;
 		case smMacroGetLen:
@@ -563,6 +562,18 @@ void HandleQueue(bool domacro)
 				NEED_DATA(smMacroGet,data[0]);
 			}
 			break;
+		case smGetDelayMacro:
+			if (SumpData(readByte))
+			{
+				if (domacro)
+				{
+					delay(data[0] * 100);
+				}
+
+				currentState = smPossibleWork;
+			}
+			break;
+
 		case smOnOff:
 			if (SumpData(readByte))
 			{
@@ -828,12 +839,13 @@ void HandleQueue(bool domacro)
 				// we CANNOT do this while we're in macro!
 				if (!domacro)
 				{
-					// pop the queue back to its useful state
-					macro.popState();
 					// flag to run in loop()
 					runMacro = true;
 				}
 				currentState = smPossibleWork;
+				break;
+			case CMD_DELAY_MACRO:
+				NEED_DATA(smGetDelayMacro, 1);
 				break;
 
 			case CMD_SET_MACRO:
@@ -853,7 +865,14 @@ void HandleQueue(bool domacro)
 				break;
 			case CMD_DISPLAY:
 #ifdef _DISPLAY_IN_LOOP
-				displayNow = true;
+				if (domacro)
+				{
+					Display();
+				}
+				else
+				{
+					displayNow = true;
+				}
 #else
 				Display();
 #endif
@@ -902,6 +921,10 @@ void HandleQueue(bool domacro)
 		default:
 			break;
 		}
+
+		// and breathe
+		if(runMacro)
+			yield();
 	}
 
 	// if we leave the available loop guessing there's more, assume none
@@ -961,15 +984,24 @@ void onI2CRequest(void)
 }
 
 #ifdef _RUN_MACRO_ON_BUTTON
-void ButtonPressed(uint8_t )
+void ButtonPressed(uint8_t pinsChanged)
 {
-	// if it's low, grounded
-	if (!(PINB & (1<<_RUN_MACRO_ON_BUTTON)))
+	// us?
+	if (pinsChanged & (1 << _RUN_MACRO_ON_BUTTON))
 	{
-		digitalWrite(LED_BUILTIN,LOW);
-
-		macro.popState();
-		runMacro = true;
+		// if we're aready running, don't bother
+		if(!runMacro)
+		{
+			// if it's low, grounded
+			if (!(PINB & (1 << _RUN_MACRO_ON_BUTTON)))
+			{
+				runMacro = true;
+			}
+		}
+		else
+		{
+			digitalWrite(LED_BUILTIN, HIGH);
+		}
 	}
 }
 #endif
