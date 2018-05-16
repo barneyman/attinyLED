@@ -203,6 +203,8 @@ const struct cRGBW ledPalette[] PROGMEM = {
 #else
 #define MAXPIX 300
 #endif
+
+
 #define MAX_USER_PALETTE	8
 byte led[MAXPIX];
 struct cRGBW userPalette[MAX_USER_PALETTE];
@@ -222,7 +224,6 @@ struct cRGB led[MAXPIX];
 
 
 
-
 // requestData returned flags
 #define _FLAG_ROOM_IN_QUEUE	128
 #define _FLAG_QUEUE_FLUSHED	64
@@ -235,7 +236,7 @@ struct cRGB led[MAXPIX];
 #define CMD_SETALL	2	// set all leds to RGB
 #define CMD_SETONE	3	// set a single led - offset(0) RGB
 #define CMD_SHIFT	4	// shift current set - signed byte (for L and R) RGB replace
-//#define CMD_ROLL	5	// roll - signed byte
+#define CMD_ROLL	5	// roll - signed byte
 #define CMD_DISPLAY	6	// shunt out to the LEDS - beware, interrupts get cleared, so I2C will fail
 #define CMD_INVERT	7	// invert all rgbs
 // only works when _XSISTOR_FOR_ON define
@@ -257,6 +258,13 @@ struct cRGB led[MAXPIX];
 unsigned currentCount = MAXPIX;
 
 
+#ifdef CMD_ROLL
+#ifdef _USE_PALETTE
+byte roll_led;
+#else
+struct cRGB roll_led;
+#endif
+#endif
 
 
 #include <avr\power.h>
@@ -734,31 +742,25 @@ void HandleQueue(bool domacro)
 #ifdef CMD_ROLL
 			if (SumpData(readByte))
 			{
-				int offset = (int)data[0];
-				// if there's no offset, there's nothing to do!
+				int offset = (int)data[0]; // +ve for right, 0 for left
 				if (offset)
 				{
-					int source = 0, dest = 0, size = currentCount, fillStart = 0;
-					if (offset > 0)
-					{
-						// shift right
-						dest += offset;
-					}
-					else
-					{
-						// shift left
-						// yes - double negative
-						source -= offset;
-						fillStart = dest;
-					}
-
-					size -= abs(offset);
-
-					for (unsigned mover = 0; mover < currentCount; mover++)
-					{
-						led[mover]
-					}
+					// remember the last one 
+					roll_led = led[currentCount - 1];
+					// move
+					memmove(&led[1], &led[0], sizeof(led[1])*(currentCount - 1));
+					led[0] = roll_led;
 				}
+				else
+				{
+					// remember the first one
+					roll_led = led[0];
+					memmove(&led[0], &led[1], sizeof(led[1])*(currentCount - 1));
+					led[currentCount - 1] = roll_led;
+				}
+				// go around again
+				currentState = smPossibleWork;
+			}
 #endif
 				break;
 		case smShiftingPalette:
