@@ -263,7 +263,7 @@ unsigned currentCount = MAXPIX;
 #include <avr\wdt.h>
 
 // doesnt need to be volatile
-unsigned long displayDuration=0;
+//unsigned long displayDuration=0;
 
 // this turns off the delay() timer
 // #define _DISABLE_TIMER
@@ -341,7 +341,7 @@ void setup()
 
 	// reset effectively
 	// and get a timing
-	DisplayTimed();
+	Display();
 
 #ifdef _RUN_MACRO_ON_BUTTON
 	// config TinyWire library for I2C slave functionality
@@ -527,7 +527,7 @@ void  loop()
 		macro.popState();
 		HandleQueue(runMacro);
 		// and display
-		DisplayTimed();
+		Display();
 		runMacro = false;
 	}
 #endif
@@ -536,7 +536,8 @@ void  loop()
 	if (displayNow)
 	{
 		// yield for just a bit, to let i2c finish up, otherwise the cli ruins the ACK response
-		delay(2);
+		//while (TinyWire.slaveReceivng())
+			delay(1);
 
 		Display();
 		displayNow = false;
@@ -1039,7 +1040,13 @@ void onI2CRequest(void)
 #endif
 		break;
 	case rsmDisplayDuration:
-		result = displayDuration & 255;
+
+		// there's 8bits * 3 colours * num leds * timing
+		unsigned long totalTime = 8UL * 3UL * (unsigned long)currentCount * 2UL; // usec
+		totalTime /= 1000UL; // msec
+
+		result=(totalTime & 255);
+
 		break;
 	}
 	TinyWire.send(result);
@@ -1065,14 +1072,6 @@ void ButtonPressed(uint8_t pinsChanged)
 }
 #endif
 
-void DisplayTimed()
-{
-	unsigned long startDisplay = millis();
-	Display();
-
-	displayDuration = millis() - startDisplay;
-
-}
 
 void Display()
 {
