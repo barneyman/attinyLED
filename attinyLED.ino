@@ -262,7 +262,8 @@ unsigned currentCount = MAXPIX;
 #include <avr\power.h>
 #include <avr\wdt.h>
 
-
+// doesnt need to be volatile
+unsigned long displayDuration=0;
 
 // this turns off the delay() timer
 // #define _DISABLE_TIMER
@@ -339,7 +340,8 @@ void setup()
 
 
 	// reset effectively
-	Display();
+	// and get a timing
+	DisplayTimed();
 
 #ifdef _RUN_MACRO_ON_BUTTON
 	// config TinyWire library for I2C slave functionality
@@ -373,7 +375,7 @@ enum stateMachine {		smIdle=0, smPossibleWork, smSizing, smOnOff,
 						smRequestResponse
 				} ;
 
-enum responseStateMachine { rsmFlags=0, rsmStack, rsmEoMarker };
+enum responseStateMachine { rsmFlags=0, rsmStack, rsmDisplayDuration, rsmEoMarker };
 
 volatile stateMachine currentState = stateMachine::smIdle;
 volatile responseStateMachine currentRequest = rsmFlags;
@@ -525,7 +527,7 @@ void  loop()
 		macro.popState();
 		HandleQueue(runMacro);
 		// and display
-		Display();
+		DisplayTimed();
 		runMacro = false;
 	}
 #endif
@@ -533,6 +535,9 @@ void  loop()
 	// flag set in the recv ISR
 	if (displayNow)
 	{
+		// yield for just a bit, to let i2c finish up, otherwise the cli ruins the ACK response
+		delay(2);
+
 		Display();
 		displayNow = false;
 	}
@@ -993,11 +998,6 @@ void onI2CReceive(int howMany)
 	if (currentState == smIdle)
 		currentState = smPossibleWork;
 
-	//while (TinyWire.available())
-	//{
-	//	theQueueTemp.write(TinyWire.read());
-	//}
-
 	// take as long as you need - no wdt, and nothing else running on the chip
 	HandleQueue(false);
 
@@ -1038,6 +1038,9 @@ void onI2CRequest(void)
 		result = 0;
 #endif
 		break;
+	case rsmDisplayDuration:
+		result = displayDuration & 255;
+		break;
 	}
 	TinyWire.send(result);
 }
@@ -1062,6 +1065,14 @@ void ButtonPressed(uint8_t pinsChanged)
 }
 #endif
 
+void DisplayTimed()
+{
+	unsigned long startDisplay = millis();
+	Display();
+
+	displayDuration = millis() - startDisplay;
+
+}
 
 void Display()
 {
@@ -1071,6 +1082,4 @@ void Display()
 	ws2812_sendarray_mask_palette(userPalette, ledPalette, led, currentCount, paletteDiv, _BV(ws2812_pin));
 #endif
 }
-
-
 
