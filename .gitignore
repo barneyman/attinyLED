@@ -2,3 +2,6 @@ Release/
 __vm/
 ArduinoISP_oldway/ArduinoISP_oldway.ino
 Debug/
+eagle/tinyled.b#?
+eagle/tinyled.s#?
+eagle/tinyled.pro
