@@ -6054,6 +6054,8 @@ Source: AVX .. aphvc.pdf</description>
 <part name="R3" library="eagle-ltspice" library_urn="urn:adsk.eagle:library:217" deviceset="R" device="0204/7" package3d_urn="urn:adsk.eagle:package:13274/1" value="300"/>
 <part name="USER2" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X2" device="" package3d_urn="urn:adsk.eagle:package:22435/2"/>
 <part name="SUPPLY6" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="GND" device=""/>
+<part name="R4" library="eagle-ltspice" library_urn="urn:adsk.eagle:library:217" deviceset="R" device="0204/7" package3d_urn="urn:adsk.eagle:package:13274/1" value="10k"/>
+<part name="P+4" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+5V" device=""/>
 </parts>
 <sheets>
 <sheet>
@@ -6081,6 +6083,8 @@ Source: AVX .. aphvc.pdf</description>
 <instance part="R3" gate="G$1" x="132.08" y="12.7" rot="R90"/>
 <instance part="USER2" gate="G$1" x="15.24" y="78.74"/>
 <instance part="SUPPLY6" gate="GND" x="0" y="60.96"/>
+<instance part="R4" gate="G$1" x="43.18" y="2.54" rot="R180"/>
+<instance part="P+4" gate="1" x="58.42" y="2.54" rot="R270"/>
 </instances>
 <busses>
 </busses>
@@ -6178,6 +6182,11 @@ Source: AVX .. aphvc.pdf</description>
 <junction x="5.08" y="10.16"/>
 <label x="-20.32" y="15.24" size="1.778" layer="95"/>
 </segment>
+<segment>
+<pinref part="R4" gate="G$1" pin="1"/>
+<pinref part="P+4" gate="1" pin="+5V"/>
+<wire x1="48.26" y1="2.54" x2="55.88" y2="2.54" width="0.1524" layer="91"/>
+</segment>
 </net>
 <net name="SDA" class="0">
 <segment>
@@ -6220,8 +6229,11 @@ Source: AVX .. aphvc.pdf</description>
 <net name="RESET" class="0">
 <segment>
 <pinref part="IC1" gate="G$1" pin="PB5/PCINT5/!RESET!/ADC0/DW"/>
-<wire x1="40.64" y1="15.24" x2="33.02" y2="15.24" width="0.1524" layer="91"/>
 <label x="25.4" y="15.24" size="1.778" layer="95"/>
+<pinref part="R4" gate="G$1" pin="2"/>
+<wire x1="38.1" y1="2.54" x2="22.86" y2="2.54" width="0.1524" layer="91"/>
+<wire x1="22.86" y1="2.54" x2="22.86" y2="15.24" width="0.1524" layer="91"/>
+<wire x1="22.86" y1="15.24" x2="40.64" y2="15.24" width="0.1524" layer="91"/>
 </segment>
 </net>
 <net name="SWITCH1" class="0">
@@ -6249,16 +6261,21 @@ Source: AVX .. aphvc.pdf</description>
 <pinref part="USER2" gate="G$1" pin="2"/>
 <wire x1="12.7" y1="78.74" x2="5.08" y2="78.74" width="0.1524" layer="91"/>
 <wire x1="5.08" y1="78.74" x2="5.08" y2="71.12" width="0.1524" layer="91"/>
-<wire x1="5.08" y1="71.12" x2="25.4" y2="71.12" width="0.1524" layer="91"/>
-<wire x1="25.4" y1="71.12" x2="25.4" y2="17.78" width="0.1524" layer="91"/>
+<wire x1="5.08" y1="71.12" x2="22.86" y2="71.12" width="0.1524" layer="91"/>
+<wire x1="22.86" y1="71.12" x2="22.86" y2="17.78" width="0.1524" layer="91"/>
 <pinref part="IC1" gate="G$1" pin="PB4/PCINT4/ADC2"/>
-<wire x1="25.4" y1="17.78" x2="40.64" y2="17.78" width="0.1524" layer="91"/>
+<wire x1="22.86" y1="17.78" x2="40.64" y2="17.78" width="0.1524" layer="91"/>
 <label x="25.4" y="17.78" size="1.778" layer="95"/>
 </segment>
 </net>
 </nets>
 </sheet>
 </sheets>
+<errors>
+<approved hash="104,1,40.64,30.48,IC1,VCC,+5V,,,"/>
+<approved hash="113,1,13.1343,63.7261,USER1,,,,,"/>
+<approved hash="113,1,13.1343,81.5061,USER2,,,,,"/>
+</errors>
 </schematic>
 </drawing>
 <compatibility>
