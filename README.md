@@ -9,4 +9,9 @@ The latter will let you control ~90 LEDs, and set RGB for each one, while the fo
 them using a pre-defined palette (basically the web pallete) - i'll add a user-defineable palette soon
 
 
+The project also includes the eagle and gerber files for the board
+The board was produced by ALLPCB for US$15 for 5
 
+![Board - Eagle](https://github.com/barneyman/attinyLED/blob/master/board.png)
+
+![Wemos driving board driving 15 leds](https://github.com/barneyman/attinyLED/blob/master/wemos-led.jpg)
