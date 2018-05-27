@@ -164,6 +164,8 @@ struct cRGB roll_led;
 #endif
 
 
+TinyTwi TinyWire;
+
 #include <avr\power.h>
 #include <avr\wdt.h>
 
