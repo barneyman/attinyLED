@@ -35,7 +35,7 @@
 
 #include <circQ.h>
 
-circQueueT<32,5> macro;
+circQueueT<32> macro;
 #endif
 
 //circQueueT<8, 3> theQueueTemp;
