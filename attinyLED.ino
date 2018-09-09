@@ -282,7 +282,7 @@ enum stateMachine {		smIdle=0, smPossibleWork, smSizing, smOnOff,
 						smRequestResponse
 				} ;
 
-enum responseStateMachine { rsmFlags=0, rsmStack, rsmDisplayDuration, rsmEoMarker };
+enum responseStateMachine { rsmFlags=0, rsmStack, rsmDisplayDuration, rsmEoMarkerUNUSED };
 
 volatile stateMachine currentState = stateMachine::smIdle;
 volatile responseStateMachine currentRequest = rsmFlags;
@@ -394,15 +394,6 @@ uint16_t StackRoomCount(void)
 
 
 
-//// disable wdt
-//void get_mcusr(void) \
-//__attribute__((naked)) \
-//__attribute__((section(".init3")));
-//void get_mcusr(void)
-//{
-//	MCUSR = 0;
-//	wdt_disable();
-//}
 
 #define _DISPLAY_IN_LOOP
 #ifdef _DISPLAY_IN_LOOP
@@ -517,7 +508,7 @@ void HandleQueue(bool domacro)
 			if (SumpData(readByte))
 			{
 				// bounds check
-				if((responseStateMachine)data[0]<rsmEoMarker)
+				if((responseStateMachine)data[0]<rsmEoMarkerUNUSED)
 					currentRequest = (responseStateMachine)data[0];
 				currentState = smPossibleWork;
 			}
@@ -912,6 +903,9 @@ void onI2CRequest(void)
 
 	switch (currentRequest)
 	{
+	case rsmEoMarkerUNUSED:
+		// never seen
+		break;
 	case rsmFlags:
 		// meh 
 		result = currentState;
